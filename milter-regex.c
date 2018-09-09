@@ -221,7 +221,7 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		result = SMFIS_DISCARD;
 		break;
 	case ACTION_ACCEPT:
-		msg(LOG_INFO, context, "ACCEPT, HELO: %s, FROM: %s, "
+		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s",
 		    context->helo, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject);
@@ -630,6 +630,9 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	va_list ap;
 	char msg[8192];
 
+	if ((priority == LOG_DEBUG) && (! debug))
+	  return;
+
 	va_start(ap, fmt);
 	if (context != NULL)
 		snprintf(msg, sizeof(msg), "%s [%s]: ", context->host_name,
@@ -673,7 +676,7 @@ main(int argc, char **argv)
 	const char *ofile = NULL;
 
 	tzset();
-	openlog("milter-regex", LOG_PID | LOG_NDELAY, LOG_DAEMON);
+	openlog("milter-regex", LOG_PID | LOG_NDELAY, LOG_MAIL);
 
 	while ((ch = getopt(argc, argv, "c:dj:p:u:")) != -1) {
 		switch (ch) {
