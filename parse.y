@@ -77,7 +77,7 @@ typedef struct {
 %}
 
 %token	ERROR STRING
-%token	ACCEPT REJECT TEMPFAIL DISCARD QUARANTINE
+%token	ACCEPT ACCEPTNOGEO REJECT TEMPFAIL DISCARD QUARANTINE
 %token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER MACRO BODY
 %token	AND OR NOT
 %type	<v.string>	STRING
@@ -143,6 +143,13 @@ action	: REJECT STRING		{
 	}
 	| ACCEPT 		{
 		$$ = create_action(rs, ACTION_ACCEPT, "");
+		if ($$ == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+	}
+	| ACCEPTNOGEO 		{
+		$$ = create_action(rs, ACTION_ACCEPTNOGEO, "");
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -296,6 +303,9 @@ lookup(char *s)
 	/* keep sorted */
 	static const struct keywords keywords[] = {
 		{ "accept",	ACCEPT },
+#ifdef GEOIP2
+		{ "acceptnogeo",	ACCEPTNOGEO },
+#endif
 		{ "and",	AND },
 		{ "body",	BODY },
 		{ "connect",	CONNECT },

@@ -13,6 +13,7 @@ struct context {
 	char		 host_name[128];
 	char		 host_addr[64];
 	char		 helo[128];
+	char		 auth_authen[128];
 	char		 env_from[128];
 	char		 env_rcpt[2048];
 	char		 hdr_from[128];
@@ -24,6 +25,7 @@ struct context {
 	struct MMDB_lookup_result_s *geoip2_result;
 	char *geoip2_result_summary;
 	int cached_SMFIS_ACCEPT;
+	int acceptnogeo;
 #endif
 };
 

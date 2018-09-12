@@ -110,7 +110,7 @@ struct {
 	{ "envfrom", "{auth_type}" },
 	{ "envfrom", "{auth_authen}" },
 	{ "envfrom", "{auth_ssf}" },
-	{ "envfrom", "{auth_author}" },
+	{ "envfrom", "{auth_authen}" },
 	{ "envfrom", "{mail_mailer}" },
 	{ "envfrom", "{mail_host}" },
 	{ "envfrom", "{mail_addr}" },
@@ -316,7 +316,7 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 	int result = SMFIS_CONTINUE;
 
 #ifdef GEOIP2
-	if (action->type != ACTION_ACCEPT)
+	if ((action->type != ACTION_ACCEPT) && (action->type != ACTION_ACCEPTNOGEO))
 		prime_geoip2(context);
 	if (context->geoip2_result && (! context->geoip2_result_summary))
 		(void)geoip2_build_summary(context);
@@ -331,13 +331,13 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 
 	switch (action->type) {
 	case ACTION_REJECT:
-		msg(LOG_NOTICE, context, "REJECT: %s, HELO: %s, FROM: %s, "
+		msg(LOG_NOTICE, context, "REJECT: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
 		    , action->msg,
-		    context->helo, context->env_from, context->env_rcpt,
+		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
@@ -346,13 +346,13 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		result = SMFIS_REJECT;
 		break;
 	case ACTION_TEMPFAIL:
-		msg(LOG_NOTICE, context, "TEMPFAIL: %s, HELO: %s, FROM: %s, "
+		msg(LOG_NOTICE, context, "TEMPFAIL: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
 		    , action->msg,
-		    context->helo, context->env_from, context->env_rcpt,
+		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
@@ -366,12 +366,12 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		context->quarantine = strdup(action->msg);
 		break;
 	case ACTION_DISCARD:
-		msg(LOG_NOTICE, context, "DISCARD, HELO: %s, FROM: %s, "
+		msg(LOG_NOTICE, context, "DISCARD, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
-		    , context->helo, context->env_from, context->env_rcpt,
+		    , context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
@@ -379,14 +379,19 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		    );
 		result = SMFIS_DISCARD;
 		break;
+#ifdef GEOIP2
+	case ACTION_ACCEPTNOGEO:
+		context->acceptnogeo = 1;
+		/* fall through */
+#endif
 	case ACTION_ACCEPT:
-		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, FROM: %s, "
+		msg(LOG_DEBUG, context, "%s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
-		    ", GeoIP2: %s"
+		    ", GeoIP2: %s", action->type == ACTION_ACCEPTNOGEO ? "ACCEPTNOGEO" :
+#else
 #endif
-		    ,
-		    context->helo, context->env_from, context->env_rcpt,
+		    "ACCEPT", context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
@@ -480,9 +485,8 @@ check_macros(SMFICTX *ctx, struct context *context, const char *phase)
 	for (i = 0; macro[i].phase != NULL; ++i) {
 		if (strcmp(macro[i].phase, phase))
 			continue;
-		if ((v = smfi_getsymval(ctx, (char *)macro[i].name)) == NULL)
-			v = "";
-		msg(LOG_DEBUG, context, "macro %s = %s", macro[i].name, v);
+		v = smfi_getsymval(ctx, (char *)macro[i].name); /* may be null.  allow testing for that. */
+		msg(LOG_DEBUG, context, "macro %s = %s", macro[i].name, v ? v : "<unset>");
 		if ((action = eval_cond(context, COND_MACRO,
 		    macro[i].name, v)) != NULL)
 			return (action);
@@ -621,11 +625,14 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		return (SMFIS_ACCEPT);
 	}
 
-	/* first opportunity to read the Message-ID */
+	/* first opportunity to read the Message-ID and auth_authen */
 	{
 		const char *MessageID = smfi_getsymval(ctx, (char *)"i");
 		if (MessageID)
 			strlcpy(context->message_id, MessageID, sizeof(context->message_id));
+		const char *auth_authen = smfi_getsymval(ctx, (char *)"{auth_authen}");
+		if (auth_authen)
+			strlcpy(context->auth_authen, auth_authen, sizeof(context->auth_authen));
 	}
 
 #ifdef GEOIP2
@@ -805,7 +812,8 @@ cb_eom(SMFICTX *ctx)
 		(void)geoip2_build_summary(context);
 	const char *geoip2_result_summary;
 	if (context->geoip2_result_summary) {
-		(void)smfi_insheader(ctx, 0, (char *)"X-GeoIP2-Summary", context->geoip2_result_summary);
+		if (! context->acceptnogeo)
+			(void)smfi_insheader(ctx, 0, (char *)"X-GeoIP2-Summary", context->geoip2_result_summary);
 		geoip2_result_summary = strchr(context->geoip2_result_summary,'/');
 		if (! geoip2_result_summary)
 			geoip2_result_summary = context->geoip2_result_summary;
@@ -817,12 +825,12 @@ cb_eom(SMFICTX *ctx)
 	    COND_MAX)) != NULL)
 		result = setreply(ctx, context, action);
 	else
-		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, FROM: %s, "
+		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
-		    , context->helo, context->env_from, context->env_rcpt,
+		    , context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
@@ -835,13 +843,13 @@ cb_eom(SMFICTX *ctx)
 #endif
 
 	if (context->quarantine != NULL) {
-		msg(LOG_NOTICE, context, "QUARANTINE: %s, HELO: %s, FROM: %s, "
+		msg(LOG_NOTICE, context, "QUARANTINE: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
 		    , action->msg,
-		    context->helo, context->env_from, context->env_rcpt,
+		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
