@@ -22,3 +22,6 @@ milter-regex.cat8: milter-regex.8
 
 clean:
 	rm -f *.core milter-regex parse.tab.{c,h} *.o *.d *.cat8
+
+#dependencies:
+-include *.d
