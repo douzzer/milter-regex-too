@@ -8,6 +8,8 @@ struct context {
 	int		*res;
 	char		 buf[2048];	/* longer body lines are wrapped */
 	unsigned	 pos;		/* write position within buf */
+	char		 my_name[128];
+	char		 message_id[64];
 	char		 host_name[128];
 	char		 host_addr[64];
 	char		 helo[128];

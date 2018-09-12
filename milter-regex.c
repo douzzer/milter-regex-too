@@ -290,7 +290,7 @@ static int geoip2_build_summary(struct context *context) {
 	static const char * const latipath[] = { "location", "latitude", (char *)0 };
 	static const char * const longipath[] = { "location", "longitude", (char *)0 };
 
-	if ((snprintf_incremental(&cp,&spc,"%s /",context->host_addr) < 0) ||
+	if ((snprintf_incremental(&cp,&spc,"%s@%s %s /",context->message_id,context->my_name,context->host_addr) < 0) ||
 	    (copy_geoip2_leaf(context, continentpath, &cp, &spc) < 0) ||
 	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
 	    (copy_geoip2_leaf(context, countrypath, &cp, &spc) < 0) ||
@@ -319,6 +319,13 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		prime_geoip2(context);
 	if (context->geoip2_result && (! context->geoip2_result_summary))
 		(void)geoip2_build_summary(context);
+	const char *geoip2_result_summary;
+	if (context->geoip2_result_summary) {
+		geoip2_result_summary = strchr(context->geoip2_result_summary,'/');
+		if (! geoip2_result_summary)
+			geoip2_result_summary = context->geoip2_result_summary;
+	} else
+		geoip2_result_summary = "";
 #endif
 
 	switch (action->type) {
@@ -332,7 +339,7 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		    context->helo, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
-		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+		    , geoip2_result_summary
 #endif
 		    );
 		result = SMFIS_REJECT;
@@ -347,7 +354,7 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		    context->helo, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
-		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+		    , geoip2_result_summary
 #endif
 		    );
 		result = SMFIS_TEMPFAIL;
@@ -363,11 +370,10 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
-		    ,
-		    context->helo, context->env_from, context->env_rcpt,
+		    , context->helo, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
-		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+		    , geoip2_result_summary
 #endif
 		    );
 		result = SMFIS_DISCARD;
@@ -382,7 +388,7 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		    context->helo, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
-		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+		    , geoip2_result_summary
 #endif
 		    );
 #ifdef GEOIP2
@@ -495,6 +501,13 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 		msg(LOG_ERR, NULL, "cb_connect: calloc: %s", strerror(errno));
 		return (SMFIS_ACCEPT);
 	}
+
+	{
+		const char *j_name = smfi_getsymval(ctx, (char *)"j");
+		if (j_name)
+			strlcpy(context->my_name, j_name, sizeof(context->my_name));
+	}
+
 	context->rs = get_ruleset();
 	if (context->rs == NULL) {
 		free(context);
@@ -517,6 +530,7 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 
 	strlcpy(context->host_name, name, sizeof(context->host_name));
 	strlcpy(context->host_addr, "unknown", sizeof(context->host_addr));
+	strlcpy(context->message_id, "<unqueued>", sizeof(context->message_id));
 	if (sa) {
 		switch (sa->sa_family) {
 		case AF_INET: {
@@ -541,6 +555,7 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 		}
 		}
 	}
+
 	msg(LOG_DEBUG, context, "cb_connect('%s', '%s')",
 	    context->host_name, context->host_addr);
 	if ((action = check_macros(ctx, context, "connect")) != NULL) {
@@ -605,6 +620,14 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		msg(LOG_ERR, NULL, "cb_envfrom: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
+	/* first opportunity to read the Message-ID */
+	{
+		const char *MessageID = smfi_getsymval(ctx, (char *)"i");
+		if (MessageID)
+			strlcpy(context->message_id, MessageID, sizeof(context->message_id));
+	}
+
 #ifdef GEOIP2
 	if (context->cached_SMFIS_ACCEPT)
 		return SMFIS_CONTINUE;
@@ -701,6 +724,7 @@ cb_eoh(SMFICTX *ctx)
 		msg(LOG_ERR, NULL, "cb_eoh: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
 #ifdef GEOIP2
 	if (context->cached_SMFIS_ACCEPT)
 		return SMFIS_CONTINUE;
@@ -773,8 +797,14 @@ cb_eom(SMFICTX *ctx)
 #ifdef GEOIP2
 	if (context->geoip2_result && (! context->geoip2_result_summary))
 		(void)geoip2_build_summary(context);
-	if (context->geoip2_result_summary)
+	const char *geoip2_result_summary;
+	if (context->geoip2_result_summary) {
 		(void)smfi_insheader(ctx, 0, (char *)"X-GeoIP2-Summary", context->geoip2_result_summary);
+		geoip2_result_summary = strchr(context->geoip2_result_summary,'/');
+		if (! geoip2_result_summary)
+			geoip2_result_summary = context->geoip2_result_summary;
+	} else
+		geoip2_result_summary = "";
 #endif
 
 	if ((action = eval_end(context->rs, context->res, COND_BODY,
@@ -789,7 +819,7 @@ cb_eom(SMFICTX *ctx)
 		    , context->helo, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
-		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+		    , geoip2_result_summary
 #endif
 		    );
 
@@ -808,7 +838,7 @@ cb_eom(SMFICTX *ctx)
 		    context->helo, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
-		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+		    , geoip2_result_summary
 #endif
 		    );
 		if (smfi_quarantine(ctx, context->quarantine) != MI_SUCCESS)
@@ -882,7 +912,7 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	va_start(ap, fmt);
 	int offset;
 	if (context != NULL)
-		offset = snprintf(msgbuf, sizeof msgbuf, "%s [%s]: ", context->host_name,
+		offset = snprintf(msgbuf, sizeof msgbuf, "%s@%s %s [%s]: ", context->message_id, context->my_name, context->host_name,
 		    context->host_addr);
 	else
 		offset = 0;
