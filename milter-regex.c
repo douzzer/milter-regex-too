@@ -30,7 +30,8 @@
  *
  */
 
-static const char rcsid[] = "$Id: milter-regex.c,v 1.9 2011/11/21 12:13:33 dhartmei Exp $";
+/* static const char rcsid[] = "$Id: milter-regex.c,v 1.9 2011/11/21 12:13:33 dhartmei Exp $"; */
+static const char gitversion[] = "$GitId: " __FILE__ " " GITVERSION " $";
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -1062,7 +1063,11 @@ main(int argc, char **argv)
 	}
 	umask(0177);
 
-	msg(LOG_INFO, NULL, "started: %s", rcsid);
+#ifdef GEOIP2
+	msg(LOG_INFO, NULL, "started: %s, with GeoIP2 extensions", gitversion);
+#else
+	msg(LOG_INFO, NULL, "started: %s", gitversion);
+#endif
 	r = smfi_main();
 	if (r != MI_SUCCESS)
 		msg(LOG_ERR, NULL, "smfi_main: terminating due to error");
@@ -1072,7 +1077,7 @@ main(int argc, char **argv)
 #ifdef GEOIP2
 	if (geoip2_db_path) {
 		if (geoip2_closedb() < 0)
-			fprintf(stderr,"geoip2_closedb(%s): %s\n",geoip2_db_path,strerror(errno));
+			msg(LOG_ERR, NULL,"geoip2_closedb(%s): %s\n",geoip2_db_path,strerror(errno));
 	}
 #endif
 

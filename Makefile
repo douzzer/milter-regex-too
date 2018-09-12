@@ -4,7 +4,9 @@ LIBS=  -lmaxminddb -lmilter -lpthread
 
 all: milter-regex milter-regex.cat8
 
-override CFLAGS+=-std=gnu99 -O2 -MMD -DGEOIP2 -I/usr/local/include -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
+GITVERSION=$(shell git describe --always --dirty; git log -1 --date=iso --format='%cd %an <%aE>')
+
+override CFLAGS+=-std=gnu99 -O2 -MMD -DGITVERSION='"$(GITVERSION)"' -DGEOIP2 -I/usr/local/include -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
 
 override LDFLAGS+=-L/usr/local/lib
 
