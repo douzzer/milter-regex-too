@@ -291,7 +291,7 @@ static int geoip2_build_summary(struct context *context) {
 	static const char * const latipath[] = { "location", "latitude", (char *)0 };
 	static const char * const longipath[] = { "location", "longitude", (char *)0 };
 
-	if ((snprintf_incremental(&cp,&spc,"%s@%s %s /",context->message_id,context->my_name,context->host_addr) < 0) ||
+	if ((snprintf_incremental(&cp,&spc,"%s%s%s %s /", context->message_id, context->message_id[0] ? "@" : "",context->my_name,context->host_addr) < 0) ||
 	    (copy_geoip2_leaf(context, continentpath, &cp, &spc) < 0) ||
 	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
 	    (copy_geoip2_leaf(context, countrypath, &cp, &spc) < 0) ||
@@ -531,7 +531,6 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 
 	strlcpy(context->host_name, name, sizeof(context->host_name));
 	strlcpy(context->host_addr, "unknown", sizeof(context->host_addr));
-	strlcpy(context->message_id, "<unqueued>", sizeof(context->message_id));
 	if (sa) {
 		switch (sa->sa_family) {
 		case AF_INET: {
@@ -630,6 +629,12 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	}
 
 #ifdef GEOIP2
+	/* force reformatting of the summary with the queue ID */
+	if (context->geoip2_result_summary) {
+		free(context->geoip2_result_summary);
+		context->geoip2_result_summary = 0;
+	}
+
 	if (context->cached_SMFIS_ACCEPT)
 		return SMFIS_CONTINUE;
 #endif
@@ -913,7 +918,7 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	va_start(ap, fmt);
 	int offset;
 	if (context != NULL)
-		offset = snprintf(msgbuf, sizeof msgbuf, "%s@%s %s [%s]: ", context->message_id, context->my_name, context->host_name,
+	  offset = snprintf(msgbuf, sizeof msgbuf, "%s@%s %s [%s]: ", context->message_id[0] ? context->message_id : "<noID>", context->my_name, context->host_name,
 		    context->host_addr);
 	else
 		offset = 0;
