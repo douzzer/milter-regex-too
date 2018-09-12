@@ -1,23 +1,24 @@
-# $Id: Makefile,v 1.1.1.1 2007/01/11 15:49:52 dhartmei Exp $
+# $Id: Makefile.linux,v 1.3 2011/07/16 13:51:34 dhartmei Exp $
 
-PROG=	milter-regex
-SRCS=	milter-regex.c eval.c parse.y
-MAN=	milter-regex.8
+LIBS=  -lmaxminddb -lmilter -lpthread
 
-CFLAGS+=	-Wall -Wstrict-prototypes -O0 -g
-CFLAGS+=	-I/usr/src/gnu/usr.sbin/sendmail/include -I..
-LDADD+=		-lmilter -lpthread -g
+all: milter-regex milter-regex.cat8
 
-install:
-	sudo rm -rf /usr/local/libexec/milter-regex
-	sudo cp ./milter-regex /usr/local/libexec/
-	sudo pkill milter-regex || echo not running
-	sleep 5
-	sudo /usr/local/libexec/milter-regex
+override CFLAGS+=-std=gnu99 -O2 -MMD -DGEOIP2 -I/usr/local/include -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
 
-.include <bsd.prog.mk>
+override LDFLAGS+=-L/usr/local/lib
 
-.if defined(WANT_LDAP)
-LDADD+=		-L/usr/local/lib -lldap_r -llber
-.endif
+milter-regex: milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
+	$(CC) $(LDFLAGS) -o $@ $+ $(LIBS)
 
+%.o: %.c
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+parse.tab.c parse.tab.h: parse.y
+	bison -d parse.y
+
+milter-regex.cat8: milter-regex.8
+	nroff -Tascii -mandoc milter-regex.8 > milter-regex.cat8
+
+clean:
+	rm -f *.core milter-regex parse.tab.{c,h} *.o *.d *.cat8

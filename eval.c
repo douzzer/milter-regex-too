@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 /* $Id: eval.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei Exp $ */
 
 /*
@@ -37,20 +39,27 @@ static const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei 
 #include <stdlib.h>
 #include <string.h>
 
-#include "eval.h"
+#include "milter-regex.h"
+
+#ifdef GEOIP2
+#include <stdio.h>
+#endif
 
 #ifndef REG_BASIC
 #define REG_BASIC	0
 #endif
 
-extern int	 yyerror(char *, ...);
+extern int	 yyerror(const char *, ...);
 extern void	 die(const char *);
 static void	 mutex_lock(void);
 static void	 mutex_unlock(void);
-static int	 check_cond(struct cond *, const char *, const char *);
+static int	 check_cond(struct context *context, struct cond *, const char *, const char *);
 static void	 push_expr_result(struct expr *, int, int *);
 static void	 push_cond_result(struct cond *, int, int *);
 static int	 build_regex(struct cond_arg *);
+#ifdef GEOIP2
+static int	 build_geoip2_path(struct cond_arg *);
+#endif
 static void	 free_expr_list(struct expr_list *, struct expr *);
 
 static pthread_mutex_t	 mutex;
@@ -132,8 +141,18 @@ create_cond(struct ruleset *rs, int type, const char *a, const char *b)
 			c->args[0].src = strdup(a);
 			if (c->args[0].src == NULL)
 				goto error;
-			if (build_regex(&c->args[0]))
-				goto error;
+#ifdef GEOIP2
+			c->type = type;
+			if (type == COND_CONNECTGEO) {
+				if (build_geoip2_path(&c->args[0]))
+					goto error;
+			} else {
+#endif
+				if (build_regex(&c->args[0]))
+					goto error;
+#ifdef GEOIP2
+			}
+#endif
 		}
 		if (b != NULL) {
 			c->args[1].src = strdup(b);
@@ -269,9 +288,12 @@ error:
 }
 
 struct action *
-eval_cond(struct ruleset *rs, int *res, int type,
+eval_cond(struct context *context, int type,
     const char *a, const char *b)
 {
+	struct ruleset *rs = context->rs;
+	int *res = context->res;
+
 	struct cond_list *cl;
 	struct action_list *al;
 
@@ -281,7 +303,7 @@ eval_cond(struct ruleset *rs, int *res, int type,
 
 		if (res[cl->cond->idx] != VAL_UNDEF)
 			continue;
-		r = check_cond(cl->cond, a, b);
+		r = check_cond(context, cl->cond, a, b);
 		if (r < 0) {
 			mutex_unlock();
 			return (NULL);
@@ -335,14 +357,60 @@ eval_clear(struct ruleset *rs, int *res, int type)
 }
 
 static int
-check_cond(struct cond *c, const char *a, const char *b)
+check_cond(__attribute__((unused)) struct context *context, struct cond *c, const char *a, const char *b)
 {
-	int i;
+#ifdef GEOIP2
+	/* if this is a GeoIP rule, the first arg is the path, not a regexp, and the second arg is always null, to be replaced with the GeoIP leaf. */
 
-	for (i = 0; i < 2; ++i) {
+	if (c->type == COND_CONNECTGEO) {
+		if ((! c->args[0].geoip2_path[0]) || (! geoip2_db_path) || (context->geoip2_lookup_ret < 0))
+			return 0;
+		if ((! c->args[1].src) || c->args[1].empty)
+			return 0;
+		if (! context->geoip2_result) {
+			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0) {
+				return 0;
+			}
+		}
+
+		struct MMDB_entry_data_list_s *leaf;
+		if (geoip2_pick_leaf(context->geoip2_result, (const char * const *)c->args[0].geoip2_path, &leaf) == 0) {
+
+			char leafbuf[256];
+			const char *s;
+			int s_len;
+			int matched = 1;
+			for (struct MMDB_entry_data_list_s *leaf_i = leaf;
+			     geoip2_iterate_leaf(&leaf_i, leafbuf, sizeof leafbuf, &s, &s_len) == 0;
+			     ) {
+				char *s_nulltermed = malloc((size_t)s_len+1); /* avoiding strndup() for portability. */
+				if (! s_nulltermed)
+					continue;
+				memcpy(s_nulltermed,s,(size_t)s_len);
+				s_nulltermed[s_len] = 0;
+				int r = regexec(&c->args[1].re, s_nulltermed, 0, NULL, 0);
+				if (r && r != REG_NOMATCH)
+					matched = -1;
+				else if ((r == REG_NOMATCH) == c->args[1].not)
+					matched = 0;
+#ifdef GEOIP2_TEST
+				fprintf(stderr,"CONNECTGEO %s %s %s -> %s matched=%d\n",context->host_addr,c->args[0].src,c->args[1].src,s_nulltermed,matched);
+#endif
+				free(s_nulltermed);
+				if (matched <= 0)
+					break;
+			}
+			if (geoip2_free_leaf(leaf) < 0)
+				perror("geoip2_free_leaf");
+			return matched;
+		} else
+			return -1;
+	}
+#endif
+
+	for (int i = 0; i < 2; ++i) {
 		const char *d = i ? b : a;
 		int r;
-
 		if (c->args[i].src == NULL || c->args[i].empty)
 			continue;
 		if (d == NULL)
@@ -496,6 +564,46 @@ build_regex(struct cond_arg *a)
 	return (0);
 }
 
+#ifdef GEOIP2
+static int
+build_geoip2_path(struct cond_arg *a)
+{
+	a->empty = 1;
+
+	if (! (a->geoip2_buf = strdup(a->src))) {
+		yyerror("build_geoip2_path: %s",strerror(errno));
+		return 1;
+	}
+
+	char *s = a->geoip2_buf;
+	char delim;
+
+	while (*s == ' ' || *s == '\t')
+		s++;
+	if (!*s) {
+		yyerror("build_geoip2_path: empty argument");
+		return 1;
+	}
+	delim = *s++;
+
+	size_t path_n = 0;
+	for (;;) {
+		if (path_n == (sizeof a->geoip2_path / sizeof a->geoip2_path[0]) - 1) {
+			yyerror("build_geoip2_path: too many path elements (max %lu)",(sizeof a->geoip2_path / sizeof a->geoip2_path[0]) - 1);
+			return 1;
+		}
+		a->geoip2_path[path_n++] = s;
+		if (! (s=strchr(s,delim)))
+			break;
+		*s++ = 0;
+		if (! *s)
+			break;
+	}
+
+	return 0;
+}
+#endif
+
 static void
 free_expr_list(struct expr_list *el, struct expr *a)
 {
@@ -551,6 +659,10 @@ free_ruleset(struct ruleset *rs)
 						free(c->args[j].src);
 						if (!c->args[j].empty)
 							regfree(&c->args[j].re);
+#ifdef GEOIP2
+						else if (c->args[j].geoip2_buf)
+							free(c->args[j].geoip2_buf);
+#endif
 					}
 				free_expr_list(c->expr, NULL);
 				free(c);

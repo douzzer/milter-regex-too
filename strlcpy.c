@@ -22,6 +22,8 @@ static const char rcsid[] = "$Id: strlcpy.c,v 1.1.1.1 2007/01/11 15:49:52 dhartm
 #include <sys/types.h>
 #include <string.h>
 
+#include "milter-regex.h"
+
 /*
  * Copy src to string dst of size siz.  At most siz-1 characters
  * will be copied.  Always NUL terminates (unless siz == 0).

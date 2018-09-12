@@ -52,31 +52,17 @@ static const char rcsid[] = "$Id: milter-regex.c,v 1.9 2011/11/21 12:13:33 dhart
 #endif
 #include <libmilter/mfapi.h>
 
-#include "eval.h"
+#include "milter-regex.h"
 
 extern void	 die(const char *);
-extern int	 parse_ruleset(const char *, struct ruleset **, char *,
-		    size_t);
 
 static const char	*rule_file_name = "/etc/milter-regex.conf";
 static int		 debug = 0;
 static pthread_mutex_t	 mutex;
 
-struct context {
-	struct ruleset	*rs;
-	int		*res;
-	char		 buf[2048];	/* longer body lines are wrapped */
-	unsigned	 pos;		/* write position within buf */
-	char		 host_name[128];
-	char		 host_addr[64];
-	char		 helo[128];
-	char		 env_from[128];
-	char		 env_rcpt[2048];
-	char		 hdr_from[128];
-	char		 hdr_to[128];
-	char		 hdr_subject[128];
-	char		*quarantine;
-};
+#ifdef GEOIP2
+const char *geoip2_db_path = 0;
+#endif
 
 static sfsistat		 setreply(SMFICTX *, struct context *,
 			    const struct action *);
@@ -135,7 +121,6 @@ struct {
 
 #if __linux__ || __sun__
 #define	ST_MTIME st_mtime
-extern size_t	 strlcpy(char *, const char *, size_t);
 #else
 #define	ST_MTIME st_mtimespec
 #endif
@@ -188,24 +173,183 @@ daemon(int nochdir, int noclose)
 }
 #endif
 
+
+#ifdef GEOIP2
+
+#ifdef GEOIP2_TEST
+static void print_geoip2_leaf(struct context *context, const char * const *nodepath) {
+	struct MMDB_entry_data_list_s *leaf, *leaf_i;
+	if (geoip2_pick_leaf(context->geoip2_result, nodepath, &leaf) == 0) {
+		char leafbuf[256];
+		const char *s;
+		int s_len;
+		for (leaf_i = leaf;
+		     geoip2_iterate_leaf(&leaf_i, leafbuf, sizeof leafbuf, &s, &s_len) == 0;
+		     ) {
+			fprintf(stderr,"%s -> %.*s\n",context->host_addr,s_len,s);
+		}
+		if (geoip2_free_leaf(leaf) < 0)
+			perror("geoip2_free_leaf");
+	}
+}
+#endif
+
+static int
+prime_geoip2(struct context *context)
+{
+
+	if (geoip2_db_path) {
+		if ((! context->geoip2_result) && (! context->geoip2_lookup_ret)) {
+			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0) {
+//				msg(LOG_DEBUG, context, "geoip2_lookup(%s): %s", context->host_addr, strerror(errno));
+				return -1;
+			}
+
+#ifdef GEOIP2_TEST
+			else {
+				static const char * const countrypath[] = { "country", "iso_code", (char *)0 };
+				print_geoip2_leaf(context, countrypath);
+				static const char * const subdivpath[] = { "subdivisions", "0", "iso_code", (char *)0 };
+				print_geoip2_leaf(context, subdivpath);
+				static const char * const citypath[] = { "city", "names", "en", (char *)0 };
+				print_geoip2_leaf(context, citypath);
+				static const char * const latpath[] = { "location", "latitude", (char *)0 };
+				print_geoip2_leaf(context, latpath);
+				static const char * const longpath[] = { "location", "longitude", (char *)0 };
+				print_geoip2_leaf(context, longpath);
+			}
+#endif /* GEOIP2_TEST */
+		}
+	}
+
+	return 0;
+}
+
+static int __attribute__((format(printf,3,4))) snprintf_incremental(char **out, size_t *out_spc, const char *fmt, ...) {
+	if (! *out_spc) {
+		errno = ENOBUFS;
+		return -1;
+	}
+	va_list ap;
+	va_start(ap,fmt);
+	int n = vsnprintf(*out, *out_spc, fmt, ap);
+	if (n<0) {
+		**out = 0;
+		return -1;
+	}
+	if ((size_t)n >= *out_spc) {
+		**out = 0;
+		errno = ENOBUFS;
+		return -1;
+	}
+	*out_spc -= (size_t)n;
+	*out += n;
+	return n;
+}
+
+static int copy_geoip2_leaf(struct context *context, const char * const *nodepath, char **out, size_t *out_spc) {
+	struct MMDB_entry_data_list_s *leaf, *leaf_i;
+	if (geoip2_pick_leaf(context->geoip2_result, nodepath, &leaf) == 0) {
+		int ret = 0;
+		char leafbuf[256];
+		const char *s;
+		int s_len;
+		for (leaf_i = leaf;
+		     geoip2_iterate_leaf(&leaf_i, leafbuf, sizeof leafbuf, &s, &s_len) == 0;
+		     ) {
+			if (snprintf_incremental(out,out_spc,"%.*s%s", s_len, s, leaf_i ? "," : "") < 0) {
+				ret = -1;
+				break;
+			}
+		}
+		if (geoip2_free_leaf(leaf) < 0)
+			perror("geoip2_free_leaf");
+		return ret;
+	} else {
+		if (snprintf_incremental(out,out_spc,"-") < 0)
+			return -1;
+		else
+			return 0;
+	}
+}
+
+static int geoip2_build_summary(struct context *context) {
+	if (! context->geoip2_result) {
+		errno = ENOENT;
+		return -1;
+	}
+	size_t spc = 256;
+	if (! (context->geoip2_result_summary = malloc(spc)))
+		return -1;
+	char *cp = context->geoip2_result_summary;
+
+	static const char * const continentpath[] = { "continent", "code", (char *)0 };
+	static const char * const countrypath[] = { "country", "iso_code", (char *)0 };
+	static const char * const subdivpath[] = { "subdivisions", "0", "iso_code", (char *)0 };
+	static const char * const citypath[] = { "city", "names", "en", (char *)0 };
+	static const char * const latipath[] = { "location", "latitude", (char *)0 };
+	static const char * const longipath[] = { "location", "longitude", (char *)0 };
+
+	if ((snprintf_incremental(&cp,&spc,"%s /",context->host_addr) < 0) ||
+	    (copy_geoip2_leaf(context, continentpath, &cp, &spc) < 0) ||
+	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+	    (copy_geoip2_leaf(context, countrypath, &cp, &spc) < 0) ||
+	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+	    (copy_geoip2_leaf(context, subdivpath, &cp, &spc) < 0) ||
+	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+	    (copy_geoip2_leaf(context, citypath, &cp, &spc) < 0) ||
+	    (snprintf_incremental(&cp,&spc,"/ ") < 0) ||
+	    (copy_geoip2_leaf(context, latipath, &cp, &spc) < 0) ||
+	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+	    (copy_geoip2_leaf(context, longipath, &cp, &spc) < 0))
+		return -1;
+
+	return 0;
+}
+
+#endif /* GEOIP2 */
+
 static sfsistat
 setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 {
 	int result = SMFIS_CONTINUE;
 
+#ifdef GEOIP2
+	if (action->type != ACTION_ACCEPT)
+		prime_geoip2(context);
+	if (context->geoip2_result && (! context->geoip2_result_summary))
+		(void)geoip2_build_summary(context);
+#endif
+
 	switch (action->type) {
 	case ACTION_REJECT:
 		msg(LOG_NOTICE, context, "REJECT: %s, HELO: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s", action->msg,
+		    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+		    ", GeoIP2: %s"
+#endif
+		    , action->msg,
 		    context->helo, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject);
+		    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+#endif
+		    );
 		result = SMFIS_REJECT;
 		break;
 	case ACTION_TEMPFAIL:
 		msg(LOG_NOTICE, context, "TEMPFAIL: %s, HELO: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s", action->msg,
+		    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+		    ", GeoIP2: %s"
+#endif
+		    , action->msg,
 		    context->helo, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject);
+		    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+#endif
+		    );
 		result = SMFIS_TEMPFAIL;
 		break;
 	case ACTION_QUARANTINE:
@@ -215,25 +359,45 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		break;
 	case ACTION_DISCARD:
 		msg(LOG_NOTICE, context, "DISCARD, HELO: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s",
+		    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+		    ", GeoIP2: %s"
+#endif
+		    ,
 		    context->helo, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject);
+		    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+#endif
+		    );
 		result = SMFIS_DISCARD;
 		break;
 	case ACTION_ACCEPT:
 		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s",
+		    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+		    ", GeoIP2: %s"
+#endif
+		    ,
 		    context->helo, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject);
+		    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+#endif
+		    );
+#ifdef GEOIP2
+		context->cached_SMFIS_ACCEPT = 1;
+#else
 		result = SMFIS_ACCEPT;
+#endif
 		break;
 	}
 	if (action->type == ACTION_REJECT &&
-	    smfi_setreply(ctx, RCODE_REJECT, XCODE_REJECT,
+	    smfi_setreply(ctx, (char *)RCODE_REJECT, (char *)XCODE_REJECT,
 	    (char *)action->msg) != MI_SUCCESS)
 		msg(LOG_ERR, context, "smfi_setreply");
 	if (action->type == ACTION_TEMPFAIL &&
-	    smfi_setreply(ctx, RCODE_TEMPFAIL, XCODE_TEMPFAIL,
+	    smfi_setreply(ctx, (char *)RCODE_TEMPFAIL, (char *)XCODE_TEMPFAIL,
 	    (char *)action->msg) != MI_SUCCESS)
 		msg(LOG_ERR, context, "smfi_setreply");
 	return (result);
@@ -294,6 +458,7 @@ get_ruleset(void)
 			cur = i;
 		}
 	}
+
 	mutex_unlock();
 	return (rs[cur]);
 }
@@ -311,10 +476,11 @@ check_macros(SMFICTX *ctx, struct context *context, const char *phase)
 		if ((v = smfi_getsymval(ctx, (char *)macro[i].name)) == NULL)
 			v = "";
 		msg(LOG_DEBUG, context, "macro %s = %s", macro[i].name, v);
-		if ((action = eval_cond(context->rs, context->res, COND_MACRO,
+		if ((action = eval_cond(context, COND_MACRO,
 		    macro[i].name, v)) != NULL)
 			return (action);
 	}
+
 	return (NULL);
 }
 
@@ -400,7 +566,7 @@ cb_helo(SMFICTX *ctx, char *arg)
 	/* evaluate connect arguments here, because we can't call */
 	/* setreply from cb_connect */
 	eval_clear(context->rs, context->res, COND_CONNECT);
-	if ((action = eval_cond(context->rs, context->res, COND_CONNECT,
+	if ((action = eval_cond(context, COND_CONNECT,
 	    context->host_name, context->host_addr)) != NULL)
 		return (setreply(ctx, context, action));
 	if ((action = eval_end(context->rs, context->res, COND_CONNECT,
@@ -410,12 +576,22 @@ cb_helo(SMFICTX *ctx, char *arg)
 	if ((action = check_macros(ctx, context, "helo")) != NULL)
 		return (setreply(ctx, context, action));
 	eval_clear(context->rs, context->res, COND_HELO);
-	if ((action = eval_cond(context->rs, context->res, COND_HELO,
+	if ((action = eval_cond(context, COND_HELO,
 	    arg, NULL)) != NULL)
 		return (setreply(ctx, context, action));
 	if ((action = eval_end(context->rs, context->res, COND_HELO,
 	    COND_MACRO)) != NULL)
 		return (setreply(ctx, context, action));
+#ifdef GEOIP2
+	eval_clear(context->rs, context->res, COND_CONNECTGEO);
+	if ((action = eval_cond(context, COND_CONNECTGEO,
+	    context->host_addr, NULL)) != NULL)
+		return (setreply(ctx, context, action));
+	if ((action = eval_end(context->rs, context->res, COND_CONNECTGEO,
+			       COND_MACRO)) != NULL)
+		return (setreply(ctx, context, action));
+#endif
+
 	return (SMFIS_CONTINUE);
 }
 
@@ -429,12 +605,16 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		msg(LOG_ERR, NULL, "cb_envfrom: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+#ifdef GEOIP2
+	if (context->cached_SMFIS_ACCEPT)
+		return SMFIS_CONTINUE;
+#endif
 	/* multiple MAIL FROM indicate separate messages */
 	eval_clear(context->rs, context->res, COND_ENVFROM);
 	if (*args != NULL) {
 		msg(LOG_DEBUG, context, "cb_envfrom('%s')", *args);
 		strlcpy(context->env_from, *args, sizeof(context->env_from));
-		if ((action = eval_cond(context->rs, context->res, COND_ENVFROM,
+		if ((action = eval_cond(context, COND_ENVFROM,
 		    *args, NULL)) != NULL)
 			return (setreply(ctx, context, action));
 	}
@@ -456,6 +636,10 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 		msg(LOG_ERR, NULL, "cb_envrcpt: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+#ifdef GEOIP2
+	if (context->cached_SMFIS_ACCEPT)
+		return SMFIS_CONTINUE;
+#endif
 	/* multiple RCPT TO: possible */
 	eval_clear(context->rs, context->res, COND_ENVRCPT);
 	if (*args != NULL) {
@@ -464,7 +648,7 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 			strlcat(context->env_rcpt, " ",
 			    sizeof(context->env_rcpt));
 		strlcat(context->env_rcpt, *args, sizeof(context->env_rcpt));
-		if ((action = eval_cond(context->rs, context->res, COND_ENVRCPT,
+		if ((action = eval_cond(context, COND_ENVRCPT,
 		    *args, NULL)) != NULL)
 			return (setreply(ctx, context, action));
 	}
@@ -486,6 +670,10 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 		msg(LOG_ERR, context, "cb_header: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+#ifdef GEOIP2
+	if (context->cached_SMFIS_ACCEPT)
+		return SMFIS_CONTINUE;
+#endif
 	msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
 	if ((action = eval_end(context->rs, context->res, COND_MACRO,
 	    COND_HEADER)) != NULL)
@@ -497,7 +685,7 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	else if (!strcasecmp(name, "Subject"))
 		strlcpy(context->hdr_subject, value,
 		    sizeof(context->hdr_subject));
-	if ((action = eval_cond(context->rs, context->res, COND_HEADER,
+	if ((action = eval_cond(context, COND_HEADER,
 	    name, value)) != NULL)
 		return (setreply(ctx, context, action));
 	return (SMFIS_CONTINUE);
@@ -513,12 +701,17 @@ cb_eoh(SMFICTX *ctx)
 		msg(LOG_ERR, NULL, "cb_eoh: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+#ifdef GEOIP2
+	if (context->cached_SMFIS_ACCEPT)
+		return SMFIS_CONTINUE;
+#endif
 	msg(LOG_DEBUG, context, "cb_eoh()");
 	memset(context->buf, 0, sizeof(context->buf));
 	context->pos = 0;
-	if ((action = eval_end(context->rs, context->res, COND_HEADER,
-	    COND_BODY)) != NULL)
+
+	if ((action = eval_end(context->rs, context->res, COND_HEADER, COND_BODY)) != NULL)
 		return (setreply(ctx, context, action));
+
 	return (SMFIS_CONTINUE);
 }
 
@@ -531,6 +724,10 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 		msg(LOG_ERR, NULL, "cb_body: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+#ifdef GEOIP2
+	if (context->cached_SMFIS_ACCEPT)
+		return SMFIS_CONTINUE;
+#endif
 	for (; size > 0; size--, chunk++) {
 		context->buf[context->pos] = *chunk;
 		if (context->buf[context->pos] == '\n' ||
@@ -544,9 +741,16 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 				context->buf[context->pos] = 0;
 			context->pos = 0;
 			msg(LOG_DEBUG, context, "cb_body('%s')", context->buf);
-			if ((action = eval_cond(context->rs, context->res,
-			    COND_BODY, context->buf, NULL)) != NULL)
-				return (setreply(ctx, context, action));
+			if ((action = eval_cond(context,
+			    COND_BODY, context->buf, NULL)) != NULL) {
+				sfsistat maybe_end_early = setreply(ctx, context, action);
+#ifdef GEOIP2
+				if (maybe_end_early == SMFIS_ACCEPT)
+					context->cached_SMFIS_ACCEPT = 1;
+				else
+#endif
+					return maybe_end_early;
+			}
 		} else
 			context->pos++;
 	}
@@ -565,19 +769,48 @@ cb_eom(SMFICTX *ctx)
 		return (SMFIS_ACCEPT);
 	}
 	msg(LOG_DEBUG, context, "cb_eom()");
+
+#ifdef GEOIP2
+	if (context->geoip2_result && (! context->geoip2_result_summary))
+		(void)geoip2_build_summary(context);
+	if (context->geoip2_result_summary)
+		(void)smfi_insheader(ctx, 0, (char *)"X-GeoIP2-Summary", context->geoip2_result_summary);
+#endif
+
 	if ((action = eval_end(context->rs, context->res, COND_BODY,
 	    COND_MAX)) != NULL)
 		result = setreply(ctx, context, action);
 	else
 		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s",
-		    context->helo, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject);
+		    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+		    ", GeoIP2: %s"
+#endif
+		    , context->helo, context->env_from, context->env_rcpt,
+		    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+#endif
+		    );
+
+#ifdef GEOIP2
+	if (context->cached_SMFIS_ACCEPT)
+		result = SMFIS_ACCEPT;
+#endif
+
 	if (context->quarantine != NULL) {
 		msg(LOG_NOTICE, context, "QUARANTINE: %s, HELO: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s", action->msg,
+		    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+		    ", GeoIP2: %s"
+#endif
+		    , action->msg,
 		    context->helo, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject);
+		    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+		    , context->geoip2_result_summary ? context->geoip2_result_summary : ""
+#endif
+		    );
 		if (smfi_quarantine(ctx, context->quarantine) != MI_SUCCESS)
 			msg(LOG_ERR, context, "cb_eom: smfi_quarantine");
 	}
@@ -587,6 +820,7 @@ cb_eom(SMFICTX *ctx)
 		free(context->quarantine);
 		context->quarantine = NULL;
 	}
+
 	return (result);
 }
 
@@ -602,6 +836,14 @@ cb_close(SMFICTX *ctx)
 		free(context->res);
 		if (context->quarantine != NULL)
 			free(context->quarantine);
+#ifdef GEOIP2
+		if (context->geoip2_result) {
+			if (geoip2_release(&context->geoip2_result) < 0)
+				perror("geoip2_release");
+		}
+		if (context->geoip2_result_summary)
+			free(context->geoip2_result_summary);
+#endif
 		context->rs->refcnt--;
 		free(context);
 	}
@@ -609,49 +851,57 @@ cb_close(SMFICTX *ctx)
 }
 
 struct smfiDesc smfilter = {
-	"milter-regex",	/* filter name */
-	SMFI_VERSION,	/* version code -- do not change */
-	SMFIF_QUARANTINE, /* flags */
-	cb_connect,	/* connection info filter */
-	cb_helo,	/* SMTP HELO command filter */
-	cb_envfrom,	/* envelope sender filter */
-	cb_envrcpt,	/* envelope recipient filter */
-	cb_header,	/* header filter */
-	cb_eoh,		/* end of header */
-	cb_body,	/* body block */
-	cb_eom,		/* end of message */
-	NULL,		/* message aborted */
-	cb_close	/* connection cleanup */
+	.xxfi_name = (char *)"milter-regex",	/* filter name */
+	.xxfi_version = SMFI_VERSION,	/* version code -- do not change */
+	.xxfi_flags = SMFIF_QUARANTINE|SMFIF_ADDHDRS, /* flags */
+	.xxfi_connect = cb_connect,	/* connection info filter */
+	.xxfi_helo = cb_helo,	/* SMTP HELO command filter */
+	.xxfi_envfrom = cb_envfrom,	/* envelope sender filter */
+	.xxfi_envrcpt = cb_envrcpt,	/* envelope recipient filter */
+	.xxfi_header = cb_header,	/* header filter */
+	.xxfi_eoh = cb_eoh,		/* end of header */
+	.xxfi_body = cb_body,	/* body block */
+	.xxfi_eom = cb_eom,		/* end of message */
+	.xxfi_abort = NULL,		/* message aborted */
+	.xxfi_close = cb_close,	/* connection cleanup */
+	.xxfi_unknown = NULL,
+	.xxfi_data = NULL,
+	.xxfi_negotiate = NULL
 };
 
 static void
-msg(int priority, struct context *context, const char *fmt, ...)
+__attribute__((format(printf,3,4)))
+msg(int priority, struct context *context, const char *fmt, ...) 
 {
 	va_list ap;
-	char msg[8192];
+	char msgbuf[8192];
 
 	if ((priority == LOG_DEBUG) && (! debug))
 	  return;
 
 	va_start(ap, fmt);
+	int offset;
 	if (context != NULL)
-		snprintf(msg, sizeof(msg), "%s [%s]: ", context->host_name,
+		offset = snprintf(msgbuf, sizeof msgbuf, "%s [%s]: ", context->host_name,
 		    context->host_addr);
 	else
-		msg[0] = 0;
-	vsnprintf(msg + strlen(msg), sizeof(msg) - strlen(msg), fmt, ap);
+		offset = 0;
+	vsnprintf(msgbuf + offset, sizeof msgbuf - (size_t)offset, fmt, ap);
 	if (debug)
-		printf("syslog: %s\n", msg);
+		printf("syslog: %s\n", msgbuf);
 	else
-		syslog(priority, "%s", msg);
+		syslog(priority, "%s", msgbuf);
 	va_end(ap);
 }
 
 static void
 usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s [-d] [-c config] [-u user] "
-	    "[-p pipe]\n", argv0);
+	fprintf(stderr, "usage: %s [-d] [-c config] [-u user] [-p pipe]"
+#ifdef GEOIP2
+		" [-g <path to GeoIP2 db file>]"
+#endif
+		"\n", argv0);
 	exit(1);
 }
 
@@ -678,7 +928,13 @@ main(int argc, char **argv)
 	tzset();
 	openlog("milter-regex", LOG_PID | LOG_NDELAY, LOG_MAIL);
 
-	while ((ch = getopt(argc, argv, "c:dj:p:u:")) != -1) {
+	while ((ch = getopt(argc, argv,
+#ifdef GEOIP2
+		"c:dj:p:u:g:"
+#else
+		"c:dj:p:u:"
+#endif
+		)) != -1) {
 		switch (ch) {
 		case 'c':
 			rule_file_name = optarg;
@@ -695,6 +951,11 @@ main(int argc, char **argv)
 		case 'u':
 			user = optarg;
 			break;
+#ifdef GEOIP2
+		case 'g':
+			geoip2_db_path = optarg;
+			break;
+#endif
 		default:
 			usage(argv[0]);
 		}
@@ -739,6 +1000,11 @@ main(int argc, char **argv)
 		}
 	}
 
+#ifdef GEOIP2
+	if (geoip2_db_path && geoip2_opendb(geoip2_db_path) < 0)
+		exit(1);
+#endif
+
 	if (pthread_mutex_init(&mutex, 0)) {
 		fprintf(stderr, "pthread_mutex_init\n");
 		goto done;
@@ -772,6 +1038,13 @@ main(int argc, char **argv)
 		msg(LOG_ERR, NULL, "smfi_main: terminating due to error");
 	else
 		msg(LOG_INFO, NULL, "smfi_main: terminating without error");
+
+#ifdef GEOIP2
+	if (geoip2_db_path) {
+		if (geoip2_closedb() < 0)
+			fprintf(stderr,"geoip2_closedb(%s): %s\n",geoip2_db_path,strerror(errno));
+	}
+#endif
 
 done:
 	return (r);

@@ -43,8 +43,9 @@ static const char rcsid[] = "$Id: parse.y,v 1.2 2011/07/16 13:52:07 dhartmei Exp
 
 #include "eval.h"
 
-int			 yyerror(char *, ...);
-static int		 yyparse(void);
+int			 yyerror(const char *, ...);
+static int		 yylex(void);
+
 static int		 define_macro(const char *, struct expr *);
 static struct expr	*find_macro(const char *);
 
@@ -77,7 +78,7 @@ typedef struct {
 
 %token	ERROR STRING
 %token	ACCEPT REJECT TEMPFAIL DISCARD QUARANTINE
-%token	CONNECT HELO ENVFROM ENVRCPT HEADER MACRO BODY
+%token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER MACRO BODY
 %token	AND OR NOT
 %type	<v.string>	STRING
 %type	<v.expr>	expr term
@@ -201,6 +202,13 @@ term	: CONNECT STRING STRING	{
 		free($2);
 		free($3);
 	}
+	| CONNECTGEO STRING STRING	{
+		$$ = create_cond(rs, COND_CONNECTGEO, $2, $3);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+	}
 	| HELO STRING		{
 		$$ = create_cond(rs, COND_HELO, $2, NULL);
 		if ($$ == NULL)
@@ -255,7 +263,8 @@ term	: CONNECT STRING STRING	{
 %%
 
 int
-yyerror(char *fmt, ...)
+__attribute__((format(printf,1,2)))
+yyerror(const char *fmt, ...)
 {
 	va_list ap;
 	errors = 1;
@@ -290,6 +299,7 @@ lookup(char *s)
 		{ "and",	AND },
 		{ "body",	BODY },
 		{ "connect",	CONNECT },
+		{ "connectgeo",	CONNECTGEO },
 		{ "discard",	DISCARD },
 		{ "envfrom",	ENVFROM },
 		{ "envrcpt",	ENVRCPT },
@@ -314,16 +324,16 @@ lookup(char *s)
 }
 
 static int
-lgetc(FILE *fin)
+lgetc(FILE *f_in)
 {
 	int c, next;
 
 restart:
-	c = getc(fin);
+	c = getc(f_in);
 	if (c == '\\') {
-		next = getc(fin);
+		next = getc(f_in);
 		if (next != '\n') {
-			ungetc(next, fin);
+			ungetc(next, f_in);
 			return (c);
 		}
 		yylval.lineno = lineno;
@@ -334,12 +344,12 @@ restart:
 }
 
 static int
-lungetc(int c, FILE *fin)
+lungetc(int c, FILE *f_in)
 {
-	return ungetc(c, fin);
+	return ungetc(c, f_in);
 }
 
-int
+static int
 yylex(void)
 {
 	int c;
@@ -360,7 +370,7 @@ top:
 
 		while ((c = lgetc(fin)) != EOF && c != del) {
 			*p++ = c;
-			if (p - buf >= sizeof(buf) - 1) {
+			if (p - buf >= (int)sizeof(buf) - 1) {
 				yyerror("yylex: message too long");
 				return (ERROR);
 			}
@@ -380,7 +390,7 @@ top:
 
 		do {
 			*p++ = c;
-			if (p - buf >= sizeof(buf)) {
+			if (p - buf >= (int)sizeof(buf)) {
 				yyerror("yylex: token too long");
 				return (ERROR);
 			}
@@ -407,7 +417,7 @@ top:
 		*p++ = del;
 		while ((c = lgetc(fin)) != EOF && c != '\n' && c != del) {
 			*p++ = c;
-			if (p - buf >= sizeof(buf) - 1) {
+			if (p - buf >= (int)sizeof(buf) - 1) {
 				yyerror("yylex: argument too long");
 				return (ERROR);
 			}
@@ -416,7 +426,7 @@ top:
 			*p++ = del;
 			while ((c = lgetc(fin)) != EOF && isalpha(c)) {
 				*p++ = c;
-				if (p - buf >= sizeof(buf)) {
+				if (p - buf >= (int)sizeof(buf)) {
 					yyerror("yylex: argument too long");
 					return (ERROR);
 				}

@@ -36,7 +36,7 @@
 #include <regex.h>
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
-enum { COND_MACRO, COND_CONNECT, COND_HELO, COND_ENVFROM, COND_ENVRCPT,
+enum { COND_MACRO, COND_CONNECT, COND_CONNECTGEO, COND_HELO, COND_ENVFROM, COND_ENVRCPT,
     COND_HEADER, COND_BODY, COND_MAX };
 enum { EXPR_AND, EXPR_OR, EXPR_NOT, EXPR_COND };
 enum { ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
@@ -45,11 +45,24 @@ enum { ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
 struct expr;
 
 struct cond {
+#ifdef GEOIP2
+	int type; /* COND_MACRO...COND_MAX */
+#endif
 	struct cond_arg {
 		char	*src;
 		int	 empty;
 		int	 not;
+#ifdef GEOIP2
+		union {
+			regex_t	 re;
+			struct {
+				char *geoip2_buf;
+				char *geoip2_path[8];
+			};
+		};
+#else
 		regex_t	 re;
+#endif
 	}			 args[2];
 	struct expr_list	*expr;
 	unsigned		 idx;
@@ -95,13 +108,15 @@ struct ruleset {
 };
 
 int		 eval_init(int);
+extern int parse_ruleset(const char *, struct ruleset **, char *, size_t);
 struct ruleset	*create_ruleset(void);
 struct expr	*create_cond(struct ruleset *, int, const char *,
 		    const char *);
 struct expr	*create_expr(struct ruleset *, int, struct expr *,
 		    struct expr *);
 struct action	*create_action(struct ruleset *, int, const char *);
-struct action	*eval_cond(struct ruleset *, int *, int,
+struct context;
+struct action	*eval_cond(struct context *context, int,
 		    const char *, const char *);
 struct action	*eval_end(struct ruleset *, int *, int, int);
 void		 eval_clear(struct ruleset *, int *, int);

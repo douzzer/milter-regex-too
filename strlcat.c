@@ -19,6 +19,7 @@
 
 #include <sys/types.h>
 #include <string.h>
+#include "milter-regex.h"
 
 /*
  * Appends src to string dst of size siz (unlike strncat, siz is the
