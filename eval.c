@@ -363,26 +363,34 @@ check_cond(__attribute__((unused)) struct context *context, struct cond *c, cons
 	/* if this is a GeoIP rule, the first arg is the path, not a regexp, and the second arg is always null, to be replaced with the GeoIP leaf. */
 
 	if (c->type == COND_CONNECTGEO) {
-		if ((! c->args[0].geoip2_path[0]) || (! geoip2_db_path) || (context->geoip2_lookup_ret < 0))
-			return 0;
-		if ((! c->args[1].src) || c->args[1].empty)
-			return 0;
+		if ((! c->args[0].geoip2_path[0]) || (! geoip2_db_path))
+			return 0; /* GeoIP2 not configured or not working -- fail open. */
+		if (context->geoip2_lookup_ret < 0)
+			return c->args[1].not ? 0 : 1; /* IP lookup failed -- fail closed. */
 		if (! context->geoip2_result) {
 			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0) {
-				return 0;
+				return c->args[1].not ? 0 : 1;
 			}
 		}
 
 		struct MMDB_entry_data_list_s *leaf;
 		if (geoip2_pick_leaf(context->geoip2_result, (const char * const *)c->args[0].geoip2_path, &leaf) == 0) {
+			int matched = 1; /* initialize to no-match. */
 
-			char leafbuf[256];
-			const char *s;
-			int s_len;
-			int matched = 1;
+			if ((! c->args[1].src) || c->args[1].empty) { /* just a leaf existence check */
+				matched = c->args[1].not ? 1 : 0;
+				goto out;
+			}
+
 			for (struct MMDB_entry_data_list_s *leaf_i = leaf;
-			     geoip2_iterate_leaf(&leaf_i, leafbuf, sizeof leafbuf, &s, &s_len) == 0;
+			     leaf_i;
 			     ) {
+				char leafbuf[256];
+				const char *s;
+				int s_len;
+
+				if (geoip2_iterate_leaf(&leaf_i, leafbuf, sizeof leafbuf, &s, &s_len) != 0)
+					break;
 				char *s_nulltermed = malloc((size_t)s_len+1); /* avoiding strndup() for portability. */
 				if (! s_nulltermed)
 					continue;
@@ -400,19 +408,38 @@ check_cond(__attribute__((unused)) struct context *context, struct cond *c, cons
 				if (matched <= 0)
 					break;
 			}
+		out:
 			if (geoip2_free_leaf(leaf) < 0)
 				perror("geoip2_free_leaf");
 			return matched;
 		} else
-			return -1;
+			return c->args[1].not ? 0 : 1; /* leaf lookup failed -- fail closed. */
 	}
 #endif
 
 	for (int i = 0; i < 2; ++i) {
 		const char *d = i ? b : a;
 		int r;
-		if (c->args[i].src == NULL || c->args[i].empty)
+		if (c->args[i].src == NULL)
 			continue;
+		if (c->args[i].empty) {
+			/* if the test value is set, the result is pass for // and fail for //n .
+			 * if the test value is null, the result is pass for //n and fail for // .
+			 * but with an empty regexp, the result is never error.  effectively,
+			 * //n is a test for the null pointer.
+			 */
+			if (d) {
+				if (c->args[i].not)
+					return 1;
+				else
+					continue;
+			} else {
+				if (c->args[i].not)
+					continue;
+				else
+					return 1;
+			}
+		}
 		if (d == NULL)
 			return (-1);
 		r = regexec(&c->args[i].re, d, 0, NULL, 0);
@@ -513,9 +540,13 @@ build_regex(struct cond_arg *a)
 	}
 	if (s == t) {
 		if (s[1]) {
-			yyerror("build_regex: empty expression with flags %s",
-			    a->src);
-			return (1);
+			if ((s[1] == 'n') && (! s[2])) /* allow negation even on empty regexps */
+				a->not = 1;
+			else {
+				yyerror("build_regex: empty expression with flags %s",
+					a->src);
+				return (1);
+			}
 		}
 	} else {
 		char *u;
