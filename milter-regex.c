@@ -78,7 +78,6 @@ static sfsistat		 cb_body(SMFICTX *, u_char *, size_t);
 static sfsistat		 cb_eom(SMFICTX *);
 static sfsistat		 cb_close(SMFICTX *);
 static void		 usage(const char *);
-static void		 msg(int, struct context *, const char *, ...);
 
 #define USER		"_milter-regex"
 #define OCONN		"unix:/var/spool/milter-regex/sock"
@@ -459,7 +458,7 @@ get_ruleset(void)
 			if (rs[i] == NULL)
 				break;
 		if (i == MAXRS)
-			msg(LOG_ERR, NULL, "all rulesets are in use, cannot "
+			msg(LOG_ERR, NULL, "all rulesets are in use (max %d), cannot "
 			    "load new one", MAXRS);
 		else if (parse_ruleset(rule_file_name, &rs[i], err,
 		    sizeof(err)) || rs[i] == NULL)
@@ -913,7 +912,7 @@ struct smfiDesc smfilter = {
 	.xxfi_negotiate = NULL
 };
 
-static void
+void
 __attribute__((format(printf,3,4)))
 msg(int priority, struct context *context, const char *fmt, ...) 
 {
@@ -1025,9 +1024,10 @@ main(int argc, char **argv)
 	if (!getuid()) {
 		struct passwd *pw;
 
+		errno = 0;
 		if ((pw = getpwnam(user)) == NULL) {
-			fprintf(stderr, "getpwnam: %s: %s\n", user,
-			    strerror(errno));
+			fprintf(stderr, "getpwnam(%s): %s\n", user,
+				errno ? strerror(errno) : "no such user");
 			return (1);
 		}
 		if (setgroups(1, &pw->pw_gid)) {

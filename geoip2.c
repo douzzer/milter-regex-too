@@ -10,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <syslog.h>
 
 #include <libgen.h>
 #include <unistd.h>
@@ -23,13 +24,22 @@
 static pthread_rwlock_t db_lock = PTHREAD_RWLOCK_INITIALIZER;
 static volatile int db_ok = 0;
 static MMDB_s static_mmdb;
+static volatile struct stat mmdb_st;
 
 int geoip2_opendb(const char *fname) {
+    int ret = -1;
+
     int rv = pthread_rwlock_wrlock(&db_lock);
     if (rv) {
-	fprintf(stderr,"pthread_rwlock_wrlock(): %s\n",strerror(rv));
+	msg(LOG_CRIT, NULL, "geoip2_opendb() pthread_rwlock_wrlock(): %s",strerror(rv));
 	errno = rv;
 	return -1;
+    }
+
+    struct stat new_mmdb_st;
+    if (stat(fname,&new_mmdb_st) < 0) {
+	msg(LOG_CRIT, NULL, "geoip2_opendb() stat(%s): %s",fname,strerror(errno));
+	goto out;
     }
 
     if (db_ok) {
@@ -39,36 +49,48 @@ int geoip2_opendb(const char *fname) {
 
     int status = MMDB_open(fname, MMDB_MODE_MMAP, &static_mmdb);
 
-    if (status == MMDB_SUCCESS)
+    if (status == MMDB_SUCCESS) {
+	mmdb_st = new_mmdb_st;
+	char mtime[32];
+	struct tm mtime_tm;
+	if (gmtime_r((const time_t *)&mmdb_st.st_mtime,&mtime_tm))
+	    strftime(mtime, sizeof mtime, "%FT%TZ", &mtime_tm);
+	else
+	    mtime[0] = 0;
+	msg(LOG_INFO, NULL, "opened %s, mtime %s, for GeoIP2 service", fname, mtime);
 	db_ok = 1;
-    else {
-        fprintf(stderr, "geoip2_opendb(): error opening \"%s\": %s\n", fname, MMDB_strerror(status));
+	ret = 0;
+    } else {
         if (status == MMDB_IO_ERROR)
-        fprintf(stderr, "geoip2_opendb(): I/O error opening \"%s\": %s\n", fname, strerror(errno));
-	return -1;
+	    msg(LOG_CRIT, NULL, "geoip2_opendb() MMDB_open(): I/O error opening \"%s\": %s", fname, strerror(errno));
+	else
+	    msg(LOG_CRIT, NULL, "geoip2_opendb() MMDB_open(): error opening \"%s\": %s", fname, MMDB_strerror(status));
+	goto out;
     }
 
-    int my_db_ok = db_ok;
+    ret = 0;
+
+ out:
 
     if ((rv=pthread_rwlock_unlock(&db_lock))) {
-	fprintf(stderr,"pthread_rwlock_unlock(): %s\n",strerror(rv));
+	msg(LOG_EMERG, NULL, "geoip2_opendb() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
 	abort();
     }
 
-    return my_db_ok ? 0 : -1;
+    return ret;
 }
 
 int geoip2_closedb(void) {
     int rv = pthread_rwlock_wrlock(&db_lock);
     if (rv) {
-	fprintf(stderr,"pthread_rwlock_wrlock(): %s\n",strerror(rv));
+	msg(LOG_CRIT, NULL, "geoip2_closedb() pthread_rwlock_wrlock(): %s",strerror(rv));
 	errno = rv;
 	return -1;
     }
     MMDB_close(&static_mmdb);
     db_ok = 0;
     if ((rv=pthread_rwlock_unlock(&db_lock))) {
-	fprintf(stderr,"pthread_rwlock_unlock(): %s\n",strerror(rv));
+	msg(LOG_EMERG, NULL, "geoip2_opendb() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
 	abort();
     }
     return 0;
@@ -84,7 +106,7 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 	goto go_straight_to_write;
 
     if ((rv=pthread_rwlock_rdlock(&db_lock))) {
-	fprintf(stderr,"pthread_rwlock_rdlock(): %s\n",strerror(rv));
+	msg(LOG_CRIT, NULL, "geoip2_lookup() pthread_rwlock_rdlock(): %s",strerror(rv));
 	errno = rv;
 	return -1;
     }
@@ -95,7 +117,6 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 
  check_again:
     {
-	static volatile struct stat mmdb_st;
 	struct stat new_mmdb_st;
 	if (stat(mmdb_path,&new_mmdb_st) < 0)
 	    goto done_checking_for_db_update;
@@ -106,12 +127,12 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 
 	    if (db_locked == FOR_READ) {
 		if ((rv=pthread_rwlock_unlock(&db_lock))) {
-		    fprintf(stderr,"pthread_rwlock_unlock(): %s\n",strerror(rv));
+		    msg(LOG_EMERG, NULL, "geoip2_lookup() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
 		    abort();
 		}
 	    go_straight_to_write:
 		if ((rv=pthread_rwlock_wrlock(&db_lock))) {
-		    fprintf(stderr,"pthread_rwlock_wrlock(): %s\n",strerror(rv));
+		    msg(LOG_CRIT, NULL, "geoip2_lookup() pthread_rwlock_wrlock(): %s",strerror(rv));
 		    errno = rv;
 		    return -1;
 		}
@@ -124,16 +145,24 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 
 		int status = MMDB_open(mmdb_path, MMDB_MODE_MMAP, &new_mmdb);
 		if (status == MMDB_SUCCESS) {
+		    mmdb_st = new_mmdb_st;
+		    char mtime[32];
+		    struct tm mtime_tm;
+		    if (gmtime_r((const time_t *)&mmdb_st.st_mtime,&mtime_tm))
+			strftime(mtime, sizeof mtime, "%FT%TZ", &mtime_tm);
+		    else
+			mtime[0] = 0;
+		    msg(LOG_INFO, NULL, "%sopened %s, mtime %s, for GeoIP2 service", db_ok ? "re" : "", mtime, mmdb_path);
 		    if (db_ok)
 			MMDB_close(&static_mmdb);
 		    else
 			db_ok = 1;
 		    static_mmdb = new_mmdb;
-		    mmdb_st = new_mmdb_st;
 		} else {
-		    fprintf(stderr, "geoip2_lookup(): error reopening \"%s\": %s\n", mmdb_path, MMDB_strerror(status));
 		    if (status == MMDB_IO_ERROR)
-			fprintf(stderr, "geoip2_lookup(): I/O error reopening \"%s\": %s\n", mmdb_path, strerror(errno));
+			msg(LOG_ERR, NULL, "geoip2_lookup() MMDB_open(): I/O error reopening \"%s\": %s", mmdb_path, strerror(errno));
+		    else
+			msg(LOG_ERR, NULL, "geoip2_opendb() MMDB_open(): error reopening \"%s\": %s", mmdb_path, MMDB_strerror(status));
 		}
 	    }
 	}
@@ -152,23 +181,18 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 
     **result = MMDB_lookup_string(&static_mmdb, ip_address, &my_gai_error, &mmdb_error);
 
-    if (0 != my_gai_error) {
-        fprintf(stderr,
-                "\n  Error from call to getaddrinfo for %s - %s\n\n",
-                ip_address, gai_strerror(my_gai_error));
+    if (my_gai_error != 0) {
+        msg(LOG_ERR, 0, "geoip2_lookup() MMDB_lookup_string() getaddrinfo(%s): %s", ip_address, gai_strerror(my_gai_error));
 	goto err_out;
     }
 
-    if (MMDB_SUCCESS != mmdb_error) {
-        fprintf(stderr, "\n  Got an error from the maxminddb library: %s\n\n",
-                MMDB_strerror(mmdb_error));
+    if (mmdb_error != MMDB_SUCCESS) {
+        msg(LOG_ERR, 0, "geoip2_lookup() MMDB_lookup_string(): %s", MMDB_strerror(mmdb_error));
 	goto err_out;
     }
 
     if (! (*result)->found_entry) {
-        fprintf(stderr,
-                "\n  Could not find an entry for this IP address (%s)\n\n",
-                ip_address);
+	errno = ENOENT;
 	goto err_out;
     }
     return 0;
@@ -179,7 +203,7 @@ err_out:
 	*result = 0;
     }
     if ((rv=pthread_rwlock_unlock(&db_lock))) {
-	fprintf(stderr,"pthread_rwlock_unlock(): %s\n",strerror(rv));
+	msg(LOG_EMERG, NULL, "geoip2_lookup() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
 	abort();
     }
     return -1;
@@ -283,7 +307,7 @@ int geoip2_release(MMDB_lookup_result_s **result) {
     *result = 0;
     int rv = pthread_rwlock_unlock(&db_lock);
     if (rv) {
-	fprintf(stderr,"pthread_rwlock_unlock(): %s\n",strerror(rv));
+	msg(LOG_EMERG, NULL, "geoip2_release() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
 	abort();
     }
     return 0;

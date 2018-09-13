@@ -29,6 +29,8 @@ struct context {
 #endif
 };
 
+extern void __attribute__((format(printf,3,4))) msg(int priority, struct context *context, const char *fmt, ...);
+
 #if __linux__ || __sun__
 size_t strlcat(char *dst, const char *src, size_t siz);
 size_t strlcpy(char *dst, const char *src, size_t siz);
