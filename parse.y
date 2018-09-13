@@ -405,7 +405,7 @@ top:
 				return (ERROR);
 			}
 		} while ((c = lgetc(fin)) != EOF &&
-		    (isalpha(c) || isdigit(c) || ispunct(c)));
+			 (isalpha(c) || isdigit(c) || (ispunct(c) && (c != '$') && (c != '(') && (c != ')'))));
 		lungetc(c, fin);
 		*p = 0;
 		token = lookup(buf);
