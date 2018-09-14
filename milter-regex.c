@@ -59,6 +59,7 @@ extern void	 die(const char *);
 
 static const char	*rule_file_name = "/etc/milter-regex.conf";
 static int		 debug = 0;
+static int starting_up = 1;
 static pthread_mutex_t	 mutex;
 
 #ifdef GEOIP2
@@ -937,6 +938,8 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	vsnprintf(msgbuf + offset, sizeof msgbuf - (size_t)offset, fmt, ap);
 	if (debug)
 		printf("syslog: %s\n", msgbuf);
+	else if (starting_up && (priority <= LOG_NOTICE))
+		fprintf(stderr,"%s\n", msgbuf);
 	else
 		syslog(priority, "%s", msgbuf);
 	va_end(ap);
@@ -974,7 +977,6 @@ main(int argc, char **argv)
 	const char *ofile = NULL;
 
 	tzset();
-	openlog("milter-regex", LOG_PID | LOG_NDELAY, LOG_MAIL);
 
 	while ((ch = getopt(argc, argv,
 #ifdef GEOIP2
@@ -1014,12 +1016,23 @@ main(int argc, char **argv)
 		usage(argv[0]);
 	}
 
+	if (! debug)
+		openlog("milter-regex", LOG_PID | LOG_NDELAY, LOG_MAIL);
+
 	if (!strncmp(oconn, "unix:", 5))
 		ofile = oconn + 5;
 	else if (!strncmp(oconn, "local:", 6))
 		ofile = oconn + 6;
-	if (ofile != NULL)
+	else if (*oconn == '/')
+		ofile = oconn;
+	if (ofile != NULL) {
+		struct stat st;
+		if ((stat(ofile,&st) == 0) && S_ISREG(st.st_mode)) {
+			fprintf(stderr,"socket path %s refers to an existing regular file.\n",ofile);
+			exit(1);
+		}
 		unlink(ofile);
+	}
 
 	/* chroot and drop privileges */
 	if (jail != NULL && (chroot(jail) || chdir("/"))) {
@@ -1049,17 +1062,17 @@ main(int argc, char **argv)
 		}
 	}
 
-#ifdef GEOIP2
-	if (geoip2_db_path && geoip2_opendb(geoip2_db_path) < 0)
-		exit(1);
-#endif
-
 	{
 	  struct ruleset *rs = get_ruleset();
 	  if (! rs)
 	    exit(1);
 	  --rs->refcnt;
 	}
+
+#ifdef GEOIP2
+	if (geoip2_db_path && geoip2_opendb(geoip2_db_path) < 0)
+		exit(1);
+#endif
 
 	if (pthread_mutex_init(&mutex, 0)) {
 		fprintf(stderr, "pthread_mutex_init\n");
@@ -1087,6 +1100,8 @@ main(int argc, char **argv)
 		goto done;
 	}
 	umask(0177);
+
+	starting_up = 0;
 
 #ifdef GEOIP2
 	msg(LOG_INFO, NULL, "started: %s, with GeoIP2 extensions", gitversion);
