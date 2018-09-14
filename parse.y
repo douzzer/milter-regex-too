@@ -193,7 +193,7 @@ expr	: term			{
 			YYERROR;
 		}
 	}
-	| NOT term		{
+	| NOT expr		{
 		$$ = create_expr(rs, EXPR_NOT, $2, NULL);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_expr");

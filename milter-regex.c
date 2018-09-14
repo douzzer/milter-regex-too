@@ -446,14 +446,19 @@ get_ruleset(void)
 		int i;
 		char err[8192];
 
-		msg(LOG_DEBUG, NULL, "loading new configuration file");
-		for (i = 0; i < MAXRS; ++i)
-			if (rs[i] != NULL && rs[i]->refcnt == 0) {
+		int n_old_rs = 0;
+		for (i = 0; i < MAXRS; ++i) {
+			if (! rs[i])
+				continue;
+			++n_old_rs;
+			if (rs[i]->refcnt == 0) {
 				msg(LOG_DEBUG, NULL, "freeing unused ruleset "
 				    "%d/%d", i, MAXRS);
 				free_ruleset(rs[i]);
 				rs[i] = NULL;
 			}
+		}
+		msg(LOG_DEBUG, NULL, "%sloading configuration file %s", n_old_rs ? "re" : "", rule_file_name);
 		for (i = 0; i < MAXRS; ++i)
 			if (rs[i] == NULL)
 				break;
@@ -464,8 +469,8 @@ get_ruleset(void)
 		    sizeof(err)) || rs[i] == NULL)
 			msg(LOG_ERR, NULL, "parse_ruleset: %s", err);
 		else {
-			msg(LOG_INFO, NULL, "configuration file %s loaded "
-			    "successfully", rule_file_name);
+			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
+			    "successfully", rule_file_name, n_old_rs ? "re" : "");
 			cur = i;
 		}
 	}
@@ -925,7 +930,7 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	va_start(ap, fmt);
 	int offset;
 	if (context != NULL)
-	  offset = snprintf(msgbuf, sizeof msgbuf, "%s@%s %s [%s]: ", context->message_id[0] ? context->message_id : "<noID>", context->my_name, context->host_name,
+	  offset = snprintf(msgbuf, sizeof msgbuf, "%s@%s %s [%s]: ", context->message_id[0] ? context->message_id : "<noQID>", context->my_name, context->host_name,
 		    context->host_addr);
 	else
 		offset = 0;
@@ -1048,6 +1053,13 @@ main(int argc, char **argv)
 	if (geoip2_db_path && geoip2_opendb(geoip2_db_path) < 0)
 		exit(1);
 #endif
+
+	{
+	  struct ruleset *rs = get_ruleset();
+	  if (! rs)
+	    exit(1);
+	  --rs->refcnt;
+	}
 
 	if (pthread_mutex_init(&mutex, 0)) {
 		fprintf(stderr, "pthread_mutex_init\n");
