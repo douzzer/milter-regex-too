@@ -76,6 +76,9 @@ typedef struct {
 
 %}
 
+/* silence warnings for expected ambiguity in the AND and OR binary operators. */
+%expect 4
+
 %token	ERROR STRING
 %token	ACCEPT ACCEPTNOGEO REJECT TEMPFAIL DISCARD QUARANTINE
 %token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER MACRO BODY
