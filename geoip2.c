@@ -152,7 +152,7 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 			strftime(mtime, sizeof mtime, "%FT%TZ", &mtime_tm);
 		    else
 			mtime[0] = 0;
-		    msg(LOG_INFO, NULL, "%sopened %s, mtime %s, for GeoIP2 service", db_ok ? "re" : "", mtime, mmdb_path);
+		    msg(LOG_INFO, NULL, "%sopened %s, mtime %s, for GeoIP2 service", db_ok ? "re" : "", mmdb_path, mtime);
 		    if (db_ok)
 			MMDB_close(&static_mmdb);
 		    else

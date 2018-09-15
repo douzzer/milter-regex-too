@@ -436,7 +436,7 @@ get_ruleset(void)
 			msg(LOG_ERR, NULL, "parse_ruleset: %s", err);
 		else {
 			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
-			    "successfully", rule_file_name, n_old_rs ? "re" : "");
+			    "successfully, mtime %lld", rule_file_name, n_old_rs ? "re" : "", (long long int)sbo.st_mtime);
 			cur = i;
 		}
 	}
