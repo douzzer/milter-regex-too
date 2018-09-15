@@ -179,21 +179,21 @@ expr_l	: expr			{
 expr	: term			{
 		$$ = $1;
 	}
-	| term AND expr	{
+	| expr AND expr	{
 		$$ = create_expr(rs, EXPR_AND, $1, $3);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_expr");
 			YYERROR;
 		}
 	}
-	| term OR expr	{
+	| expr OR expr	{
 		$$ = create_expr(rs, EXPR_OR, $1, $3);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_expr");
 			YYERROR;
 		}
 	}
-	| NOT expr		{
+	| NOT term		{
 		$$ = create_expr(rs, EXPR_NOT, $2, NULL);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_expr");

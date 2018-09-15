@@ -177,49 +177,13 @@ daemon(int nochdir, int noclose)
 
 #ifdef GEOIP2
 
-#ifdef GEOIP2_TEST
-static void print_geoip2_leaf(struct context *context, const char * const *nodepath) {
-	struct MMDB_entry_data_list_s *leaf, *leaf_i;
-	if (geoip2_pick_leaf(context->geoip2_result, nodepath, &leaf) == 0) {
-		char leafbuf[256];
-		const char *s;
-		int s_len;
-		for (leaf_i = leaf;
-		     geoip2_iterate_leaf(&leaf_i, leafbuf, sizeof leafbuf, &s, &s_len) == 0;
-		     ) {
-			fprintf(stderr,"%s -> %.*s\n",context->host_addr,s_len,s);
-		}
-		if (geoip2_free_leaf(leaf) < 0)
-			perror("geoip2_free_leaf");
-	}
-}
-#endif
-
 static int
 prime_geoip2(struct context *context)
 {
-
 	if (geoip2_db_path) {
 		if ((! context->geoip2_result) && (! context->geoip2_lookup_ret)) {
-			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0) {
-//				msg(LOG_DEBUG, context, "geoip2_lookup(%s): %s", context->host_addr, strerror(errno));
+			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0)
 				return -1;
-			}
-
-#ifdef GEOIP2_TEST
-			else {
-				static const char * const countrypath[] = { "country", "iso_code", (char *)0 };
-				print_geoip2_leaf(context, countrypath);
-				static const char * const subdivpath[] = { "subdivisions", "0", "iso_code", (char *)0 };
-				print_geoip2_leaf(context, subdivpath);
-				static const char * const citypath[] = { "city", "names", "en", (char *)0 };
-				print_geoip2_leaf(context, citypath);
-				static const char * const latpath[] = { "location", "latitude", (char *)0 };
-				print_geoip2_leaf(context, latpath);
-				static const char * const longpath[] = { "location", "longitude", (char *)0 };
-				print_geoip2_leaf(context, longpath);
-			}
-#endif /* GEOIP2_TEST */
 		}
 	}
 
@@ -316,7 +280,7 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 	int result = SMFIS_CONTINUE;
 
 #ifdef GEOIP2
-	if ((action->type != ACTION_ACCEPT) && (action->type != ACTION_ACCEPTNOGEO))
+	if (action->type != ACTION_ACCEPTNOGEO)
 		prime_geoip2(context);
 	if (context->geoip2_result && (! context->geoip2_result_summary))
 		(void)geoip2_build_summary(context);
