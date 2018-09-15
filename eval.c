@@ -248,7 +248,7 @@ error:
 }
 
 struct action *
-create_action(struct ruleset *rs, int type, const char *msgtxt)
+create_action(struct ruleset *rs, int type, const char *msgtxt, int lineno)
 {
 	struct action *a = NULL;
 	struct action_list *al = NULL;
@@ -263,6 +263,7 @@ create_action(struct ruleset *rs, int type, const char *msgtxt)
 	a->type = type;
 	a->msg = msgtxt == NULL ? NULL : strdup(msgtxt);
 	a->idx = rs->maxidx++;
+	a->lineno = lineno;
 	al->action = a;
 	/* tail insert, so actions have same order as file */
 	if (rs->action == NULL)

@@ -97,6 +97,7 @@ struct action {
 	int			 type;
 	char			*msg;
 	unsigned		 idx;
+	int			 lineno;
 };
 
 struct action_list {
@@ -118,7 +119,7 @@ struct expr	*create_cond(struct ruleset *, int, const char *,
 		    const char *);
 struct expr	*create_expr(struct ruleset *, int, struct expr *,
 		    struct expr *);
-struct action	*create_action(struct ruleset *, int, const char *);
+struct action	*create_action(struct ruleset *, int, const char *, int lineno);
 struct context;
 struct action	*eval_cond(struct context *context, int,
 		    const char *, const char *);

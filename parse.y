@@ -111,7 +111,7 @@ macro	: STRING '=' expr	{
 	;
 
 action	: REJECT STRING		{
-		$$ = create_action(rs, ACTION_REJECT, $2);
+	$$ = create_action(rs, ACTION_REJECT, $2, yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -119,7 +119,7 @@ action	: REJECT STRING		{
 		free($2);
 	}
 	| TEMPFAIL STRING	{
-		$$ = create_action(rs, ACTION_TEMPFAIL, $2);
+		$$ = create_action(rs, ACTION_TEMPFAIL, $2, yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -127,7 +127,7 @@ action	: REJECT STRING		{
 		free($2);
 	}
 	| QUARANTINE STRING	{
-		$$ = create_action(rs, ACTION_QUARANTINE, $2);
+		$$ = create_action(rs, ACTION_QUARANTINE, $2, yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -135,21 +135,21 @@ action	: REJECT STRING		{
 		free($2);
 	}
 	| DISCARD 		{
-		$$ = create_action(rs, ACTION_DISCARD, "");
+		$$ = create_action(rs, ACTION_DISCARD, "", yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
 		}
 	}
 	| ACCEPT 		{
-		$$ = create_action(rs, ACTION_ACCEPT, "");
+		$$ = create_action(rs, ACTION_ACCEPT, "", yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
 		}
 	}
 	| ACCEPTNOGEO 		{
-		$$ = create_action(rs, ACTION_ACCEPTNOGEO, "");
+		$$ = create_action(rs, ACTION_ACCEPTNOGEO, "", yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
