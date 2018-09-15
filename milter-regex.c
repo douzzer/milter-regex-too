@@ -826,7 +826,7 @@ cb_eom(SMFICTX *ctx)
 			;
 		else {
 			char action_msg_buf[64];
-			snprintf(action_msg_buf,sizeof action_msg_buf,"%s%s%s %ld %d",context->message_id, context->message_id[0] ? "@" : "",context->my_name,sbo.st_mtime,action->lineno);
+			snprintf(action_msg_buf,sizeof action_msg_buf,"%s%s%s %lld %d",context->message_id, context->message_id[0] ? "@" : "",context->my_name,(long long int)sbo.st_mtime,action->lineno);
 			(void)smfi_insheader(ctx, 0, (char *)"X-Milter-Regex-Decision-Trace", action_msg_buf);
 		}
 	}
