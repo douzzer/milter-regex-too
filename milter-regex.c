@@ -328,6 +328,12 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		if (context->quarantine != NULL)
 			free(context->quarantine);
 		context->quarantine = strdup(action->msg);
+		context->quarantine_lineno = action->lineno;
+		/* note, evaluation continues -- might yet get
+		 * rejected, but if it's accepted, either implicitly
+		 * or explicitly, it will nonetheless be
+		 * quarantined.
+		 */
 		break;
 	case ACTION_DISCARD:
 		msg(LOG_NOTICE, context, "DISCARD L%d, HELO: %s, Authen: %s, FROM: %s, "
@@ -812,11 +818,12 @@ cb_eom(SMFICTX *ctx)
 		result = SMFIS_ACCEPT;
 #endif
 
-	if (action && ((action->type == ACTION_ACCEPT) || (action->type == ACTION_QUARANTINE)
+	if (action && (! context->quarantine) && ((action->type == ACTION_ACCEPT)
 #ifdef GEOIP2
 		       || (action->type == ACTION_ACCEPTNOGEO)
 #endif
-		       )) {
+						  )
+	    ) {
 		const char *if_addr;
 		if (context->auth_authen[0]
 		    || smfi_getsymval(ctx, (char *)"{auth_authen}")
@@ -829,6 +836,10 @@ cb_eom(SMFICTX *ctx)
 			snprintf(action_msg_buf,sizeof action_msg_buf,"%s%s%s %lld %d",context->message_id, context->message_id[0] ? "@" : "",context->my_name,(long long int)sbo.st_mtime,action->lineno);
 			(void)smfi_insheader(ctx, 0, (char *)"X-Milter-Regex-Decision-Trace", action_msg_buf);
 		}
+	} else if (context->quarantine) {
+		char action_msg_buf[64];
+		snprintf(action_msg_buf,sizeof action_msg_buf,"%s%s%s %lld %d",context->message_id, context->message_id[0] ? "@" : "",context->my_name,(long long int)sbo.st_mtime,context->quarantine_lineno);
+		(void)smfi_insheader(ctx, 0, (char *)"X-Milter-Regex-Decision-Trace", action_msg_buf);
 	}
 
 	if (context->quarantine != NULL) {
@@ -837,7 +848,7 @@ cb_eom(SMFICTX *ctx)
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
-		    , action->lineno, action->msg,
+		    , context->quarantine_lineno, context->quarantine,
 		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
@@ -865,6 +876,32 @@ cb_close(SMFICTX *ctx)
 	context = (struct context *)smfi_getpriv(ctx);
 	msg(LOG_DEBUG, context, "cb_close()");
 	if (context != NULL) {
+		if (! context->been_syslogged) {
+#ifdef GEOIP2
+			prime_geoip2(context);
+			if (context->geoip2_result && (! context->geoip2_result_summary))
+				(void)geoip2_build_summary(context);
+			const char *geoip2_result_summary;
+			if (context->geoip2_result_summary) {
+				geoip2_result_summary = strchr(context->geoip2_result_summary,'/');
+				if (! geoip2_result_summary)
+					geoip2_result_summary = context->geoip2_result_summary;
+			} else
+				geoip2_result_summary = "";
+#endif
+			msg(LOG_INFO, context, "CLOSED: HELO: %s, Authen: %s, FROM: %s, "
+			    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+			    ", GeoIP2: %s"
+#endif
+			    ,
+			    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
+			    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+			    , geoip2_result_summary
+#endif
+			    );
+		}
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
 		if (context->quarantine != NULL)
@@ -914,10 +951,11 @@ msg(int priority, struct context *context, const char *fmt, ...)
 
 	va_start(ap, fmt);
 	int offset;
-	if (context != NULL)
-	  offset = snprintf(msgbuf, sizeof msgbuf, "%s@%s %s [%s]: ", context->message_id[0] ? context->message_id : "<noQID>", context->my_name, context->host_name,
-		    context->host_addr);
-	else
+	if (context != NULL) {
+		offset = snprintf(msgbuf, sizeof msgbuf, "%s@%s %s [%s]: ", context->message_id[0] ? context->message_id : "<noQID>", context->my_name, context->host_name,
+				  context->host_addr);
+		context->been_syslogged = 1;
+	} else
 		offset = 0;
 	vsnprintf(msgbuf + offset, sizeof msgbuf - (size_t)offset, fmt, ap);
 	if (debug)

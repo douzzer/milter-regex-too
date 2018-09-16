@@ -20,6 +20,8 @@ struct context {
 	char		 hdr_to[128];
 	char		 hdr_subject[128];
 	char		*quarantine;
+	int		 quarantine_lineno;
+	int		 been_syslogged;
 #ifdef GEOIP2
 	int geoip2_lookup_ret;
 	struct MMDB_lookup_result_s *geoip2_result;
