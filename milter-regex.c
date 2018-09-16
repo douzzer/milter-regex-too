@@ -946,8 +946,11 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	va_list ap;
 	char msgbuf[8192];
 
-	if ((priority == LOG_DEBUG) && (! debug))
-	  return;
+	if ((priority == LOG_DEBUG) && (! debug)) {
+		if (context)
+			context->been_syslogged = 1;
+		return;
+	}
 
 	va_start(ap, fmt);
 	int offset;
