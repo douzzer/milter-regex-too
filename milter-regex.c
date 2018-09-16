@@ -355,6 +355,7 @@ setreply(SMFICTX *ctx, struct context *context, const struct action *action)
 		/* fall through */
 #endif
 	case ACTION_ACCEPT:
+		context->been_syslogged = 1;
 		msg(LOG_DEBUG, context, "%s L%d, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
@@ -800,7 +801,8 @@ cb_eom(SMFICTX *ctx)
 	if ((action = eval_end(context->rs, context->res, COND_BODY,
 	    COND_MAX)) != NULL)
 		result = setreply(ctx, context, action);
-	else
+	else {
+		context->been_syslogged = 1;
 		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
@@ -812,6 +814,7 @@ cb_eom(SMFICTX *ctx)
 		    , geoip2_result_summary
 #endif
 		    );
+	}
 
 #ifdef GEOIP2
 	if (context->cached_SMFIS_ACCEPT)
@@ -946,11 +949,8 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	va_list ap;
 	char msgbuf[8192];
 
-	if ((priority == LOG_DEBUG) && (! debug)) {
-		if (context)
-			context->been_syslogged = 1;
+	if ((priority == LOG_DEBUG) && (! debug))
 		return;
-	}
 
 	va_start(ap, fmt);
 	int offset;
