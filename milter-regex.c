@@ -48,6 +48,7 @@ static const char gitversion[] = "$GitId: " __FILE__ " " GITVERSION " $";
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <ctype.h>
 #ifdef __linux__
 #include <grp.h>
 #endif
@@ -274,17 +275,10 @@ static int geoip2_build_summary(struct context *context) {
 
 #endif /* GEOIP2 */
 
-static sfsistat
-setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *action)
-{
-	int result = SMFIS_CONTINUE;
-
-	context->action_type = action->type;
-	context->action_lineno = action->lineno;
-	context->last_phase_done = phase;
-
+static void
+setreply_lognotice(int lvl, const char *action_name, struct context *context, const struct action *action) {
 #ifdef GEOIP2
-	if (action->type != ACTION_WHITELIST)
+	if (action && (action->type != ACTION_WHITELIST))
 		prime_geoip2(context);
 	if (context->geoip2_result && (! context->geoip2_result_summary))
 		(void)geoip2_build_summary(context);
@@ -297,35 +291,54 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 		geoip2_result_summary = "";
 #endif
 
-	switch (action->type) {
-	case ACTION_REJECT:
-		msg(LOG_NOTICE, context, "REJECT L%d: %s, HELO: %s, Authen: %s, FROM: %s, "
+	const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
+
+	if (context->quarantine) {
+		msg(lvl, context, "%s L%d @%s: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
-		    , action->lineno, action->msg,
+		    , action_name, context->quarantine_lineno, last_phase_done, context->quarantine,
 		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
 #endif
 		    );
+		return;
+	}
+
+	msg(lvl, context, "%s L%d @%s: %s%sHELO: %s, Authen: %s, FROM: %s, "
+	    "RCPT: %s, From: %s, To: %s, Subject: %s"
+#ifdef GEOIP2
+	    ", GeoIP2: %s"
+#endif
+	    , action_name, context->action_lineno, last_phase_done, action ? action->msg : "", (action && action->msg[0]) ? ", " : "",
+	    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
+	    context->hdr_from, context->hdr_to, context->hdr_subject
+#ifdef GEOIP2
+	    , geoip2_result_summary
+#endif
+	    );
+}
+
+static sfsistat
+setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *action)
+{
+	int result = SMFIS_CONTINUE;
+
+	context->action_type = action->type;
+	context->action_lineno = action->lineno;
+	context->last_phase_done = phase;
+
+	switch (action->type) {
+	case ACTION_REJECT:
+		setreply_lognotice(LOG_NOTICE, "REJECT", context, action);
 		result = SMFIS_REJECT;
 		break;
 	case ACTION_TEMPFAIL:
-		msg(LOG_NOTICE, context, "TEMPFAIL L%d: %s, HELO: %s, Authen: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s"
-#ifdef GEOIP2
-		    ", GeoIP2: %s"
-#endif
-		    , action->lineno, action->msg,
-		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject
-#ifdef GEOIP2
-		    , geoip2_result_summary
-#endif
-		    );
+		setreply_lognotice(LOG_NOTICE, "TEMPFAIL", context, action);
 		result = SMFIS_TEMPFAIL;
 		break;
 	case ACTION_QUARANTINE:
@@ -340,34 +353,13 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 		 */
 		break;
 	case ACTION_DISCARD:
-		msg(LOG_NOTICE, context, "DISCARD L%d, HELO: %s, Authen: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s"
-#ifdef GEOIP2
-		    ", GeoIP2: %s"
-#endif
-		    , action->lineno, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject
-#ifdef GEOIP2
-		    , geoip2_result_summary
-#endif
-		    );
+		setreply_lognotice(LOG_NOTICE, "DISCARD", context, action);
 		result = SMFIS_DISCARD;
 		break;
 	case ACTION_WHITELIST:
 	case ACTION_ACCEPT:
 		context->been_syslogged = 1;
-		msg(LOG_DEBUG, context, "%s L%d, HELO: %s, Authen: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s"
-#ifdef GEOIP2
-		    ", GeoIP2: %s"
-#endif
-		    , action->type == ACTION_WHITELIST ? "WHITELIST" : "ACCEPT",
-		    action->lineno, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject
-#ifdef GEOIP2
-		    , geoip2_result_summary
-#endif
-		    );
+		setreply_lognotice(LOG_DEBUG, action->type == ACTION_WHITELIST ? "WHITELIST" : "ACCEPT", context, action);
 		result = SMFIS_ACCEPT;
 		break;
 	}
@@ -813,28 +805,21 @@ cb_eom(SMFICTX *ctx)
 		geoip2_result_summary = "";
 #endif
 
-	if ((action = eval_end(context, COND_BODY,
-	    COND_MAX)) != NULL)
-		result = setreply(ctx, context, COND_BODY, action);
-	else {
-		context->been_syslogged = 1;
-		msg(LOG_DEBUG, context, "ACCEPT, HELO: %s, Authen: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s"
-#ifdef GEOIP2
-		    ", GeoIP2: %s"
-#endif
-		    , context->helo, context->auth_authen, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject
-#ifdef GEOIP2
-		    , geoip2_result_summary
-#endif
-		    );
-	}
-
 	if (context->action_result == SMFIS_ACCEPT)
 		result = SMFIS_ACCEPT;
+	else {
+		if ((action = eval_end(context, COND_BODY,
+				       COND_MAX)) != NULL)
+			result = setreply(ctx, context, COND_BODY, action);
+		else {
+			context->been_syslogged = 1;
+			setreply_lognotice(LOG_DEBUG, "ACCEPT", context, 0);
+		}
+		if (context->action_result == SMFIS_ACCEPT)
+			result = SMFIS_ACCEPT;
+	}
 
-	if (action && (! context->quarantine) && ((action->type == ACTION_ACCEPT) || (action->type == ACTION_WHITELIST))) {
+	if ((! context->quarantine) && ((context->action_type == ACTION_ACCEPT) || (context->action_type == ACTION_WHITELIST))) {
 		const char *if_addr;
 		if (context->auth_authen[0]
 		    || smfi_getsymval(ctx, (char *)"{auth_authen}")
@@ -843,8 +828,9 @@ cb_eom(SMFICTX *ctx)
 		    || (! strcmp(context->host_addr,if_addr)))
 			;
 		else {
-			char action_msg_buf[64];
-			snprintf(action_msg_buf,sizeof action_msg_buf,"%s%s%s %lld %d",context->message_id, context->message_id[0] ? "@" : "",context->my_name,(long long int)sbo.st_mtime,action->lineno);
+			const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
+			char action_msg_buf[128];
+			snprintf(action_msg_buf,sizeof action_msg_buf,"%s%s%s %lld %d %s",context->message_id, context->message_id[0] ? "@" : "",context->my_name,(long long int)sbo.st_mtime,context->action_lineno, last_phase_done);
 			(void)smfi_insheader(ctx, 0, (char *)"X-Milter-Regex-Decision-Trace", action_msg_buf);
 		}
 	} else if (context->quarantine) {
@@ -854,18 +840,7 @@ cb_eom(SMFICTX *ctx)
 	}
 
 	if (context->quarantine != NULL) {
-		msg(LOG_NOTICE, context, "QUARANTINE L%d: %s, HELO: %s, Authen: %s, FROM: %s, "
-		    "RCPT: %s, From: %s, To: %s, Subject: %s"
-#ifdef GEOIP2
-		    ", GeoIP2: %s"
-#endif
-		    , context->quarantine_lineno, context->quarantine,
-		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
-		    context->hdr_from, context->hdr_to, context->hdr_subject
-#ifdef GEOIP2
-		    , geoip2_result_summary
-#endif
-		    );
+		setreply_lognotice(LOG_NOTICE, "QUARANTINE", context, 0);
 		if (smfi_quarantine(ctx, context->quarantine) != MI_SUCCESS)
 			msg(LOG_ERR, context, "cb_eom: smfi_quarantine");
 	}
@@ -901,18 +876,15 @@ cb_close(SMFICTX *ctx)
 				geoip2_result_summary = "";
 #endif
 			const char *action_name = lookup_action_name(context->action_type);
-			msg(LOG_INFO, context, "CLOSED: PHASE: %s, ACTION: %s%s%d, HELO: %s, Authen: %s, FROM: %s, "
-			    "RCPT: %s, From: %s, To: %s, Subject: %s"
-#ifdef GEOIP2
-			    ", GeoIP2: %s"
-#endif
-			    ,
-			    lookup_cond_name(context->last_phase_done), action_name, action_name[0] ? " L" : "L", context->action_lineno, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
-			    context->hdr_from, context->hdr_to, context->hdr_subject
-#ifdef GEOIP2
-			    , geoip2_result_summary
-#endif
-			    );
+			char action_name_upcased[64];
+			strcpy(action_name_upcased,"CLOSED/");
+			for (char *cp = action_name_upcased + strlen("CLOSED/");; ++cp, ++action_name) {
+				*cp = toupper(*action_name);
+				if (! *action_name)
+					break;
+			}
+
+			setreply_lognotice(LOG_INFO, action_name_upcased, context, 0);
 		}
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
@@ -1005,7 +977,7 @@ main(int argc, char **argv)
 {
 	int ch;
 	const char *oconn = OCONN;
-	const char *user = USER;
+	const char *user = 0 /* USER */;
 	const char *jail = NULL;
 	sfsistat r = MI_FAILURE;
 	const char *ofile = NULL;
@@ -1073,7 +1045,7 @@ main(int argc, char **argv)
 		perror("chroot");
 		return (1);
 	}
-	if (!getuid()) {
+	if (user) {
 		struct passwd *pw;
 
 		errno = 0;
