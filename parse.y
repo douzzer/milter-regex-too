@@ -80,8 +80,8 @@ typedef struct {
 %expect 4
 
 %token	ERROR STRING
-%token	ACCEPT ACCEPTNOGEO REJECT TEMPFAIL DISCARD QUARANTINE
-%token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER MACRO BODY
+%token	ACCEPT WHITELIST REJECT TEMPFAIL DISCARD QUARANTINE
+%token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER MACRO BODY PHASEDONE
 %token	AND OR NOT
 %type	<v.string>	STRING
 %type	<v.expr>	expr term
@@ -151,8 +151,8 @@ action	: REJECT STRING		{
 			YYERROR;
 		}
 	}
-	| ACCEPTNOGEO 		{
-		$$ = create_action(rs, ACTION_ACCEPTNOGEO, "", yylval.lineno);
+	| WHITELIST 		{
+		$$ = create_action(rs, ACTION_WHITELIST, "", yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -257,6 +257,12 @@ term	: CONNECT STRING STRING	{
 			YYERROR;
 		free($2);
 	}
+	| PHASEDONE STRING	{
+		$$ = create_cond(rs, COND_PHASEDONE, $2, NULL);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+	}
 	| '(' expr ')'		{
 		$$ = $2;
 	}
@@ -292,6 +298,8 @@ yyerror(const char *fmt, ...)
 struct keywords {
 	const char	*k_name;
 	int		 k_val;
+	enum { K_TYPE_COND, K_TYPE_EXPR, K_TYPE_ACTION } k_keyword_type;
+	int		 k_keyword_id;
 };
 
 static int
@@ -300,31 +308,31 @@ kw_cmp(const void *k, const void *e)
 	return (strcmp(k, ((struct keywords *)e)->k_name));
 }
 
+/* keep sorted */
+static const struct keywords keywords[] = {
+	{ "accept",	ACCEPT,		K_TYPE_ACTION,	ACTION_ACCEPT },
+	{ "and",	AND,		K_TYPE_EXPR,	EXPR_AND },
+	{ "body",	BODY,		K_TYPE_COND,	COND_BODY },
+	{ "connect",	CONNECT,	K_TYPE_COND,	COND_CONNECT },
+	{ "connectgeo",	CONNECTGEO,	K_TYPE_COND,	COND_CONNECTGEO },
+	{ "discard",	DISCARD,	K_TYPE_ACTION,	ACTION_DISCARD },
+	{ "envfrom",	ENVFROM,	K_TYPE_COND,	COND_ENVFROM },
+	{ "envrcpt",	ENVRCPT,	K_TYPE_COND,	COND_ENVRCPT },
+	{ "header",	HEADER,		K_TYPE_COND,	COND_HEADER },
+	{ "helo",	HELO,		K_TYPE_COND,	COND_HELO },
+	{ "macro",	MACRO,		K_TYPE_COND,	COND_MACRO },
+	{ "not",	NOT,		K_TYPE_EXPR,	EXPR_NOT },
+	{ "or",		OR,		K_TYPE_EXPR,	EXPR_OR },
+	{ "phasedone",	PHASEDONE,	K_TYPE_COND,	COND_PHASEDONE },
+	{ "quarantine",	QUARANTINE,	K_TYPE_ACTION,	ACTION_QUARANTINE },
+	{ "reject",	REJECT,		K_TYPE_ACTION,	ACTION_REJECT },
+	{ "tempfail",	TEMPFAIL,	K_TYPE_ACTION,	ACTION_TEMPFAIL },
+	{ "whitelist",	WHITELIST,	K_TYPE_ACTION,	ACTION_WHITELIST },
+};
+
 static int
 lookup(char *s)
 {
-	/* keep sorted */
-	static const struct keywords keywords[] = {
-		{ "accept",	ACCEPT },
-#ifdef GEOIP2
-		{ "acceptnogeo",	ACCEPTNOGEO },
-#endif
-		{ "and",	AND },
-		{ "body",	BODY },
-		{ "connect",	CONNECT },
-		{ "connectgeo",	CONNECTGEO },
-		{ "discard",	DISCARD },
-		{ "envfrom",	ENVFROM },
-		{ "envrcpt",	ENVRCPT },
-		{ "header",	HEADER },
-		{ "helo",	HELO },
-		{ "macro",	MACRO },
-		{ "not",	NOT },
-		{ "or",		OR },
-		{ "quarantine",	QUARANTINE },
-		{ "reject",	REJECT },
-		{ "tempfail",	TEMPFAIL },
-	};
 	const struct keywords *p;
 
 	p = bsearch(s, keywords, sizeof(keywords) / sizeof(keywords[0]),
@@ -334,6 +342,30 @@ lookup(char *s)
 		return (p->k_val);
 	else
 		return (STRING);
+}
+
+const char *
+lookup_action_name(int action_type)
+{
+	for (const struct keywords *p = &keywords[0], *end = &keywords[sizeof keywords / sizeof keywords[0]]; p < end; ++p) {
+		if (p->k_keyword_type != K_TYPE_ACTION)
+			continue;
+		if (p->k_keyword_id == action_type)
+			return p->k_name;
+	}
+	return "";
+}
+
+const char *
+lookup_cond_name(int cond_type)
+{
+	for (const struct keywords *p = &keywords[0], *end = &keywords[sizeof keywords / sizeof keywords[0]]; p < end; ++p) {
+		if (p->k_keyword_type != K_TYPE_COND)
+			continue;
+		if (p->k_keyword_id == cond_type)
+			return p->k_name;
+	}
+	return "";
 }
 
 static int

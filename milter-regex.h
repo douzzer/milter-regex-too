@@ -19,6 +19,11 @@ struct context {
 	char		 hdr_from[128];
 	char		 hdr_to[128];
 	char		 hdr_subject[128];
+	int		 last_phase_done;
+	int		 action_type;
+	int		 action_result;
+	int		 action_lineno;
+	int		 whitelist;
 	char		*quarantine;
 	int		 quarantine_lineno;
 	int		 been_syslogged;
@@ -26,8 +31,6 @@ struct context {
 	int geoip2_lookup_ret;
 	struct MMDB_lookup_result_s *geoip2_result;
 	char *geoip2_result_summary;
-	int cached_SMFIS_ACCEPT;
-	int acceptnogeo;
 #endif
 };
 

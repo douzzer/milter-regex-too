@@ -36,15 +36,11 @@
 #include <regex.h>
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
-enum { COND_MACRO, COND_CONNECT, COND_CONNECTGEO, COND_HELO, COND_ENVFROM, COND_ENVRCPT,
-    COND_HEADER, COND_BODY, COND_MAX };
+enum { COND_NONE=0, COND_MACRO, COND_CONNECT, COND_CONNECTGEO, COND_HELO, COND_ENVFROM, COND_ENVRCPT,
+    COND_HEADER, COND_BODY, COND_PHASEDONE, COND_MAX };
 enum { EXPR_AND, EXPR_OR, EXPR_NOT, EXPR_COND };
-enum { ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
-    ACTION_DISCARD, ACTION_ACCEPT
-#ifdef GEOIP2
-       , ACTION_ACCEPTNOGEO
-#endif
-     };
+enum { ACTION_NONE=0, ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
+    ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST };
 
 struct expr;
 
@@ -114,6 +110,8 @@ struct ruleset {
 
 int		 eval_init(int);
 extern int parse_ruleset(const char *, struct ruleset **, char *, size_t);
+extern const char *lookup_action_name(int action_type);
+extern const char *lookup_cond_name(int cond_type);
 struct ruleset	*create_ruleset(void);
 struct expr	*create_cond(struct ruleset *, int, const char *,
 		    const char *);
@@ -123,8 +121,8 @@ struct action	*create_action(struct ruleset *, int, const char *, int lineno);
 struct context;
 struct action	*eval_cond(struct context *context, int,
 		    const char *, const char *);
-struct action	*eval_end(struct ruleset *, int *, int, int);
-void		 eval_clear(struct ruleset *, int *, int);
+struct action	*eval_end(struct context *context, int, int);
+void		 eval_clear(struct context *context, int);
 void		 free_ruleset(struct ruleset *);
 
 #endif

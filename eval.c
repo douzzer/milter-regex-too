@@ -288,8 +288,8 @@ error:
 	return (NULL);
 }
 
-struct action *
-eval_cond(struct context *context, int type,
+static struct action *
+eval_cond_1(struct context *context, int type,
     const char *a, const char *b)
 {
 	struct ruleset *rs = context->rs;
@@ -298,35 +298,51 @@ eval_cond(struct context *context, int type,
 	struct cond_list *cl;
 	struct action_list *al;
 
-	mutex_lock();
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
 		int r;
-
 		if (res[cl->cond->idx] != VAL_UNDEF)
 			continue;
 		r = check_cond(context, cl->cond, a, b);
-		if (r < 0) {
-			mutex_unlock();
+		if (r < 0)
 			return (NULL);
-		} else if (!r)
+		else if (!r)
 			push_cond_result(cl->cond, VAL_TRUE, res);
 	}
 	for (al = rs->action; al != NULL; al = al->next)
-		if (res[al->action->idx] == VAL_TRUE) {
-			mutex_unlock();
+		if (res[al->action->idx] == VAL_TRUE)
 			return (al->action);
-		}
-	mutex_unlock();
 	return (NULL);
 }
 
 struct action *
-eval_end(struct ruleset *rs, int *res, int type, int max)
+eval_cond(struct context *context, int type,
+    const char *a, const char *b)
 {
+	struct action *ret;
+	mutex_lock();
+	ret = eval_cond_1(context,type,a,b);
+	mutex_unlock();
+	return ret;
+}
+
+struct action *
+eval_end(struct context *context, int type, int max)
+{
+	struct ruleset *rs = context->rs;
+	int *res = context->res;
+
 	struct cond_list *cl;
 	struct action_list *al;
 
 	mutex_lock();
+
+	context->last_phase_done = type;
+	struct action *phasedone_action = eval_cond_1(context, COND_PHASEDONE, 0, 0);
+	if (phasedone_action) {
+		mutex_unlock();
+		return phasedone_action;
+	}
+
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 		if (res[cl->cond->idx] == VAL_UNDEF)
 			push_cond_result(cl->cond, VAL_FALSE, res);
@@ -335,19 +351,25 @@ eval_end(struct ruleset *rs, int *res, int type, int max)
 			mutex_unlock();
 			return (al->action);
 		}
-	for (type = max; type < COND_MAX; ++type)
+	for (type = max; type < COND_MAX; ++type) {
+		if (type == COND_PHASEDONE)
+			continue;
 		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 			if (res[cl->cond->idx] == VAL_UNDEF) {
 				mutex_unlock();
 				return (NULL);
 			}
+	}
 	mutex_unlock();
 	return (&default_action);
 }
 
 void
-eval_clear(struct ruleset *rs, int *res, int type)
+eval_clear(struct context *context, int type)
 {
+	struct ruleset *rs = context->rs;
+	int *res = context->res;
+
 	struct cond_list *cl;
 
 	mutex_lock();
@@ -417,6 +439,19 @@ check_cond(__attribute__((unused)) struct context *context, struct cond *c, cons
 			return c->args[1].not ? 0 : 1; /* leaf lookup failed -- fail closed. */
 	}
 #endif
+
+	if (c->type == COND_PHASEDONE) {
+		if ((! c->args[0].src) || c->args[0].empty) /* nonsense existence check */
+			return c->args[0].not;
+		if (context->last_phase_done == COND_NONE)
+			return -1;
+		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
+		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
+		if (r)
+			return -1; /* last_phase_done evolves, so REG_NOMATCH mustn't be treated as final. */
+		else
+			return c->args[0].not;
+	}
 
 	for (int i = 0; i < 2; ++i) {
 		const char *d = i ? b : a;
