@@ -50,9 +50,6 @@ static const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei 
 #endif
 
 extern int	 yyerror(const char *, ...);
-extern void	 die(const char *);
-static void	 mutex_lock(void);
-static void	 mutex_unlock(void);
 static int	 check_cond(struct context *context, struct cond *, const char *, const char *);
 static void	 push_expr_result(struct expr *, int, int *);
 static void	 push_cond_result(struct cond *, int, int *);
@@ -62,7 +59,7 @@ static int	 build_geoip2_path(struct cond_arg *);
 #endif
 static void	 free_expr_list(struct expr_list *, struct expr *);
 
-static pthread_mutex_t	 mutex;
+static pthread_mutex_t	 eval_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct action	 default_action;
 
 int
@@ -70,24 +67,23 @@ eval_init(int type)
 {
 	memset(&default_action, 0, sizeof(default_action));
 	default_action.type = type;
-	if (pthread_mutex_init(&mutex, 0))
-		return (1);
-	else
-		return (0);
+	return 0;
 }
 
 static void
-mutex_lock(void)
+eval_mutex_lock(void)
 {
-	if (pthread_mutex_lock(&mutex))
-		die("pthread_mutex_lock");
+	int rv = pthread_mutex_lock(&eval_mutex);
+	if (rv)
+		die_with_errno(rv,"pthread_mutex_lock");
 }
 
 static void
-mutex_unlock(void)
+eval_mutex_unlock(void)
 {
-	if (pthread_mutex_unlock(&mutex))
-		die("pthread_mutex_unlock");
+	int rv = pthread_mutex_unlock(&eval_mutex);
+	if (rv)
+		die_with_errno(rv,"pthread_mutex_unlock");
 }
 
 struct ruleset *
@@ -111,7 +107,7 @@ create_cond(struct ruleset *rs, int type, const char *a, const char *b)
 	struct expr *e = NULL;
 	struct expr_list *elc = NULL;
 
-	mutex_lock();
+	eval_mutex_lock();
 	e = calloc(1, sizeof(struct expr));
 	if (e == NULL)
 		goto error;
@@ -173,7 +169,7 @@ create_cond(struct ruleset *rs, int type, const char *a, const char *b)
 	elc->expr = e;
 	elc->next = c->expr;
 	c->expr = elc;
-	mutex_unlock();
+	eval_mutex_unlock();
 	return (e);
 
 error:
@@ -194,7 +190,7 @@ error:
 			free(c->args[0].src);
 		free(c);
 	}
-	mutex_unlock();
+	eval_mutex_unlock();
 	return (NULL);
 }
 
@@ -204,7 +200,7 @@ create_expr(struct ruleset *rs, int type, struct expr *a, struct expr *b)
 	struct expr *e = NULL;
 	struct expr_list *ela = NULL, *elb = NULL;
 
-	mutex_lock();
+	eval_mutex_lock();
 	e = calloc(1, sizeof(struct expr));
 	if (e == NULL)
 		goto error;
@@ -232,7 +228,7 @@ create_expr(struct ruleset *rs, int type, struct expr *a, struct expr *b)
 		elb->next = b->expr;
 		b->expr = elb;
 	}
-	mutex_unlock();
+	eval_mutex_unlock();
 	return (e);
 
 error:
@@ -243,7 +239,7 @@ error:
 		free(ela);
 	if (e != NULL)
 		free(e);
-	mutex_unlock();
+	eval_mutex_unlock();
 	return (NULL);
 }
 
@@ -253,7 +249,7 @@ create_action(struct ruleset *rs, int type, const char *msgtxt, int lineno)
 	struct action *a = NULL;
 	struct action_list *al = NULL;
 
-	mutex_lock();
+	eval_mutex_lock();
 	a = calloc(1, sizeof(struct action));
 	if (a == NULL)
 		goto error;
@@ -275,7 +271,7 @@ create_action(struct ruleset *rs, int type, const char *msgtxt, int lineno)
 			t = t->next;
 		t->next = al;
 	}
-	mutex_unlock();
+	eval_mutex_unlock();
 	return (a);
 
 error:
@@ -284,7 +280,7 @@ error:
 		free(al);
 	if (a != NULL)
 		free(a);
-	mutex_unlock();
+	eval_mutex_unlock();
 	return (NULL);
 }
 
@@ -319,9 +315,9 @@ eval_cond(struct context *context, int type,
     const char *a, const char *b)
 {
 	struct action *ret;
-	mutex_lock();
+	eval_mutex_lock();
 	ret = eval_cond_1(context,type,a,b);
-	mutex_unlock();
+	eval_mutex_unlock();
 	return ret;
 }
 
@@ -334,12 +330,12 @@ eval_end(struct context *context, int type, int max)
 	struct cond_list *cl;
 	struct action_list *al;
 
-	mutex_lock();
+	eval_mutex_lock();
 
 	context->last_phase_done = type;
 	struct action *phasedone_action = eval_cond_1(context, COND_PHASEDONE, 0, 0);
 	if (phasedone_action) {
-		mutex_unlock();
+		eval_mutex_unlock();
 		return phasedone_action;
 	}
 
@@ -348,7 +344,7 @@ eval_end(struct context *context, int type, int max)
 			push_cond_result(cl->cond, VAL_FALSE, res);
 	for (al = rs->action; al != NULL; al = al->next)
 		if (res[al->action->idx] == VAL_TRUE) {
-			mutex_unlock();
+			eval_mutex_unlock();
 			return (al->action);
 		}
 	for (type = max; type < COND_MAX; ++type) {
@@ -356,11 +352,11 @@ eval_end(struct context *context, int type, int max)
 			continue;
 		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 			if (res[cl->cond->idx] == VAL_UNDEF) {
-				mutex_unlock();
+				eval_mutex_unlock();
 				return (NULL);
 			}
 	}
-	mutex_unlock();
+	eval_mutex_unlock();
 	return (&default_action);
 }
 
@@ -372,11 +368,11 @@ eval_clear(struct context *context, int type)
 
 	struct cond_list *cl;
 
-	mutex_lock();
+	eval_mutex_lock();
 	for (; type < COND_MAX; ++type)
 		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 			push_cond_result(cl->cond, VAL_UNDEF, res);
-	mutex_unlock();
+	eval_mutex_unlock();
 }
 
 static int
@@ -706,9 +702,9 @@ free_ruleset(struct ruleset *rs)
 	int i;
 	struct action_list *al, *aln;
 
-	mutex_lock();
+	eval_mutex_lock();
 	if (rs == NULL || rs->refcnt) {
-		mutex_unlock();
+		eval_mutex_unlock();
 		return;
 	}
 	for (i = 0; i < COND_MAX; ++i) {
@@ -752,5 +748,5 @@ free_ruleset(struct ruleset *rs)
 		al = aln;
 	}
 	free(rs);
-	mutex_unlock();
+	eval_mutex_unlock();
 }

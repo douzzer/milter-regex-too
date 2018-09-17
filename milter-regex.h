@@ -35,6 +35,9 @@ struct context {
 };
 
 extern void __attribute__((format(printf,3,4))) msg(int priority, struct context *context, const char *fmt, ...);
+extern void __die(const char *fn, int lineno, int this_errno, const char *reason);
+#define die(reason) __die(__FILE__, __LINE__, errno, reason)
+#define die_with_errno(this_errno,reason) __die(__FILE__, __LINE__, this_errno, reason)
 
 #if __linux__ || __sun__
 size_t strlcat(char *dst, const char *src, size_t siz);

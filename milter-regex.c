@@ -46,6 +46,7 @@ static const char gitversion[] = "$GitId: " __FILE__ " " GITVERSION " $";
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#define SYSLOG_NAMES
 #include <syslog.h>
 #include <unistd.h>
 #include <ctype.h>
@@ -56,12 +57,10 @@ static const char gitversion[] = "$GitId: " __FILE__ " " GITVERSION " $";
 
 #include "milter-regex.h"
 
-extern void	 die(const char *);
-
 static const char	*rule_file_name = "/etc/milter-regex.conf";
 static int		 debug = 0;
 static int starting_up = 1;
-static pthread_mutex_t	 mutex;
+static pthread_mutex_t	 reload_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef GEOIP2
 const char *geoip2_db_path = 0;
@@ -128,17 +127,19 @@ struct {
 #endif
 
 static void
-mutex_lock(void)
+reload_mutex_lock(void)
 {
-	if (pthread_mutex_lock(&mutex))
-		die("pthread_mutex_lock");
+	int rv = pthread_mutex_lock(&reload_mutex);
+	if (rv)
+		die_with_errno(rv,"pthread_mutex_lock");
 }
 
 static void
-mutex_unlock(void)
+reload_mutex_unlock(void)
 {
-	if (pthread_mutex_unlock(&mutex))
-		die("pthread_mutex_unlock");
+	int rv = pthread_mutex_unlock(&reload_mutex);
+	if (rv)
+		die_with_errno(rv,"pthread_mutex_unlock");
 }
 
 #ifdef __sun__
@@ -185,6 +186,9 @@ prime_geoip2(struct context *context)
 		if ((! context->geoip2_result) && (! context->geoip2_lookup_ret)) {
 			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0)
 				return -1;
+		} else if (context->geoip2_lookup_ret < 0) {
+			errno = EINVAL;
+			return -1;
 		}
 	}
 
@@ -314,7 +318,7 @@ setreply_lognotice(int lvl, const char *action_name, struct context *context, co
 #ifdef GEOIP2
 	    ", GeoIP2: %s"
 #endif
-	    , action_name, context->action_lineno, last_phase_done, action ? action->msg : "", (action && action->msg[0]) ? ", " : "",
+	    , action_name, context->action_lineno, last_phase_done, (action && action->msg) ? action->msg : "", (action && action->msg && action->msg[0]) ? ", " : "",
 	    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 	    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
@@ -391,7 +395,7 @@ get_ruleset(void)
 	time_t t = time(NULL);
 	int load = 0;
 
-	mutex_lock();
+	reload_mutex_lock();
 	if (!last_check)
 		memset(&sbo, 0, sizeof(sbo));
 	if (t - last_check >= 10) {
@@ -442,7 +446,7 @@ get_ruleset(void)
 		}
 	}
 
-	mutex_unlock();
+	reload_mutex_unlock();
 	return (rs[cur]);
 }
 
@@ -875,16 +879,21 @@ cb_close(SMFICTX *ctx)
 			} else
 				geoip2_result_summary = "";
 #endif
-			const char *action_name = lookup_action_name(context->action_type);
+			const char *action_name;
 			char action_name_upcased[64];
-			strcpy(action_name_upcased,"CLOSED/");
-			for (char *cp = action_name_upcased + strlen("CLOSED/");; ++cp, ++action_name) {
-				*cp = toupper(*action_name);
-				if (! *action_name)
-					break;
+			if (context->action_type == ACTION_NONE)
+				action_name = "CLOSED/NOACTION";
+			else {
+				action_name = lookup_action_name(context->action_type);
+				strcpy(action_name_upcased,"CLOSED/");
+				for (char *cp = action_name_upcased + strlen("CLOSED/");; ++cp, ++action_name) {
+					*cp = toupper(*action_name);
+					if (! *action_name)
+						break;
+				}
+				action_name = action_name_upcased;
 			}
-
-			setreply_lognotice(LOG_INFO, action_name_upcased, context, 0);
+			setreply_lognotice(LOG_INFO, action_name, context, 0);
 		}
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
@@ -893,7 +902,7 @@ cb_close(SMFICTX *ctx)
 #ifdef GEOIP2
 		if (context->geoip2_result) {
 			if (geoip2_release(&context->geoip2_result) < 0)
-				perror("geoip2_release");
+				msg(LOG_CRIT,context,"geoip2_release(): %s",strerror(errno));
 		}
 		if (context->geoip2_result_summary)
 			free(context->geoip2_result_summary);
@@ -927,12 +936,11 @@ void
 __attribute__((format(printf,3,4)))
 msg(int priority, struct context *context, const char *fmt, ...) 
 {
-	va_list ap;
-	char msgbuf[8192];
-
 	if ((priority == LOG_DEBUG) && (! debug))
 		return;
 
+	char msgbuf[8192];
+	va_list ap;
 	va_start(ap, fmt);
 	int offset;
 	if (context != NULL) {
@@ -942,9 +950,20 @@ msg(int priority, struct context *context, const char *fmt, ...)
 	} else
 		offset = 0;
 	vsnprintf(msgbuf + offset, sizeof msgbuf - (size_t)offset, fmt, ap);
-	if (debug)
-		printf("syslog: %s\n", msgbuf);
-	else if (starting_up && (priority <= LOG_NOTICE))
+	if (debug) {
+		const char *priorityname;
+		for (int i = 0;; ++i) {
+			if (! prioritynames[i].c_name) {
+				priorityname = "LOG_???";
+				break;
+			}
+			if (prioritynames[i].c_val == priority) {
+				priorityname = prioritynames[i].c_name;
+				break;
+			}
+		}
+		printf("%s %lld: %s\n", priorityname, (long long int)time(0), msgbuf);
+	} else if (starting_up && (priority <= LOG_NOTICE))
 		fprintf(stderr,"%s\n", msgbuf);
 	else
 		syslog(priority, "%s", msgbuf);
@@ -963,9 +982,12 @@ usage(const char *argv0)
 }
 
 void
-die(const char *reason)
+__die(const char *fn, int lineno, int this_errno, const char *reason)
 {
-	msg(LOG_ERR, NULL, "die: %s", reason);
+	if (this_errno > 0)
+		msg(LOG_CRIT, NULL, "die %s@%d (%s): %s", fn, lineno, strerror(this_errno), reason);
+	else
+		msg(LOG_CRIT, NULL, "die %s@%d: %s", fn, lineno, reason);
 	smfi_stop();
 	sleep(60);
 	/* not reached, smfi_stop() kills thread */
@@ -1080,10 +1102,12 @@ main(int argc, char **argv)
 		exit(1);
 #endif
 
-	if (pthread_mutex_init(&mutex, 0)) {
+#if 0
+	if (pthread_mutex_init(&reload_mutex, 0)) {
 		fprintf(stderr, "pthread_mutex_init\n");
 		goto done;
 	}
+#endif
 
 	if (smfi_setconn((char *)oconn) != MI_SUCCESS) {
 		fprintf(stderr, "smfi_setconn: %s: failed\n", oconn);
@@ -1116,7 +1140,7 @@ main(int argc, char **argv)
 #endif
 	r = smfi_main();
 	if (r != MI_SUCCESS)
-		msg(LOG_ERR, NULL, "smfi_main: terminating due to error");
+		msg(LOG_CRIT, NULL, "smfi_main: terminating due to error: %s",strerror(errno));
 	else
 		msg(LOG_INFO, NULL, "smfi_main: terminating without error");
 

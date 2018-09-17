@@ -30,11 +30,8 @@ int geoip2_opendb(const char *fname) {
     int ret = -1;
 
     int rv = pthread_rwlock_wrlock(&db_lock);
-    if (rv) {
-	msg(LOG_CRIT, NULL, "geoip2_opendb() pthread_rwlock_wrlock(): %s",strerror(rv));
-	errno = rv;
-	return -1;
-    }
+    if (rv)
+	die_with_errno(rv, "geoip2_opendb() pthread_rwlock_wrlock()");
 
     struct stat new_mmdb_st;
     if (stat(fname,&new_mmdb_st) < 0) {
@@ -72,27 +69,20 @@ int geoip2_opendb(const char *fname) {
 
  out:
 
-    if ((rv=pthread_rwlock_unlock(&db_lock))) {
-	msg(LOG_EMERG, NULL, "geoip2_opendb() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
-	abort();
-    }
+    if ((rv=pthread_rwlock_unlock(&db_lock)))
+	die_with_errno(rv, "geoip2_opendb() pthread_rwlock_unlock()");
 
     return ret;
 }
 
 int geoip2_closedb(void) {
     int rv = pthread_rwlock_wrlock(&db_lock);
-    if (rv) {
-	msg(LOG_CRIT, NULL, "geoip2_closedb() pthread_rwlock_wrlock(): %s",strerror(rv));
-	errno = rv;
-	return -1;
-    }
+    if (rv)
+	die_with_errno(rv, "geoip2_closedb() pthread_rwlock_unlock()");
     MMDB_close(&static_mmdb);
     db_ok = 0;
-    if ((rv=pthread_rwlock_unlock(&db_lock))) {
-	msg(LOG_EMERG, NULL, "geoip2_opendb() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
-	abort();
-    }
+    if ((rv=pthread_rwlock_unlock(&db_lock)))
+	die_with_errno(rv, "geoip2_closedb() pthread_rwlock_unlock()");
     return 0;
 }
 
@@ -105,11 +95,9 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
     if (! db_ok)
 	goto go_straight_to_write;
 
-    if ((rv=pthread_rwlock_rdlock(&db_lock))) {
-	msg(LOG_CRIT, NULL, "geoip2_lookup() pthread_rwlock_rdlock(): %s",strerror(rv));
-	errno = rv;
-	return -1;
-    }
+ open_read_only:
+    if ((rv=pthread_rwlock_rdlock(&db_lock)))
+	die_with_errno(rv, "geoip2_lookup() pthread_rwlock_rdlock()");
     db_locked = FOR_READ;
 
     if (! mmdb_path)
@@ -126,15 +114,22 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 	    (new_mmdb_st.st_ctime != mmdb_st.st_ctime)) {
 
 	    if (db_locked == FOR_READ) {
-		if ((rv=pthread_rwlock_unlock(&db_lock))) {
-		    msg(LOG_EMERG, NULL, "geoip2_lookup() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
-		    abort();
-		}
+		if ((rv=pthread_rwlock_unlock(&db_lock)))
+		    die_with_errno(rv, "geoip2_lookup() pthread_rwlock_unlock()");
+		db_locked = FOR_NOTHING;
+	    }
+	    if (db_locked != FOR_WRITE) {
 	    go_straight_to_write:
-		if ((rv=pthread_rwlock_wrlock(&db_lock))) {
-		    msg(LOG_CRIT, NULL, "geoip2_lookup() pthread_rwlock_wrlock(): %s",strerror(rv));
-		    errno = rv;
-		    return -1;
+		if (db_locked != FOR_NOTHING)
+		    die_with_errno(-1,"geoip2_lookup() attempt to double-lock db_lock");
+		if ((rv=pthread_rwlock_trywrlock(&db_lock))) {
+		    msg(LOG_NOTICE, NULL, "geoip2_lookup() pthread_rwlock_trywrlock(): %s",strerror(rv));
+		    if (! db_ok) {
+			errno = rv;
+			return -1;
+		    }
+		    mmdb_path = 0;
+		    goto open_read_only;
 		}
 		db_locked = FOR_WRITE;
 		goto check_again;
@@ -173,6 +168,9 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
     if (! db_ok)
 	goto err_out;
 
+    if (db_locked == FOR_NOTHING)
+	die_with_errno(-1,"attempt to access db without a lock");
+
     *result = malloc(sizeof(MMDB_lookup_result_s));
     if (! *result)
 	goto err_out;
@@ -202,10 +200,8 @@ err_out:
 	free(*result);
 	*result = 0;
     }
-    if ((rv=pthread_rwlock_unlock(&db_lock))) {
-	msg(LOG_EMERG, NULL, "geoip2_lookup() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
-	abort();
-    }
+    if ((rv=pthread_rwlock_unlock(&db_lock)))
+	die_with_errno(rv, "geoip2_lookup() pthread_rwlock_unlock()");
     return -1;
 }
 
@@ -306,10 +302,8 @@ int geoip2_release(MMDB_lookup_result_s **result) {
     free(*result);
     *result = 0;
     int rv = pthread_rwlock_unlock(&db_lock);
-    if (rv) {
-	msg(LOG_EMERG, NULL, "geoip2_release() pthread_rwlock_unlock(): %s (aborting)",strerror(rv));
-	abort();
-    }
+    if (rv)
+	die_with_errno(rv, "geoip2_release() pthread_rwlock_unlock()");
     return 0;
 }
 
