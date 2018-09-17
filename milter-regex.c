@@ -382,11 +382,9 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 
 	context->action_result = result;
 
-#ifdef GEOIP2
 	if (result == SMFIS_ACCEPT)
 		return SMFIS_CONTINUE;
 	else
-#endif
 		return result;
 }
 
