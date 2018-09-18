@@ -92,7 +92,7 @@ static void		 usage(const char *);
  * with smfi_getsymval(). Whether sendmail actually provides specific
  * values depends on configuration of confMILTER_MACROS_*
  */
-struct {
+static const struct {
 	const char *phase;
 	const char *name;
 } macro[] = {
@@ -101,11 +101,15 @@ struct {
 	{ "connect", "{if_addr}" },
 	{ "connect", "j" },
 	{ "connect", "_" },
+	{ "connect", "{client_resolve}" },
 	{ "helo", "{tls_version}" },
 	{ "helo", "{cipher}" },
 	{ "helo", "{cipher_bits}" },
 	{ "helo", "{cert_subject}" },
 	{ "helo", "{cert_issuer}" },
+	{ "helo", "{verify}" },
+	{ "helo", "{server_name}" },
+	{ "helo", "{server_addr}" },
 	{ "envfrom", "i" },
 	{ "envfrom", "{auth_type}" },
 	{ "envfrom", "{auth_authen}" },
@@ -119,6 +123,12 @@ struct {
 	{ "envrcpt", "{rcpt_addr}" },
 	{ NULL, NULL }
 };
+
+static const char
+	connect_macrolist[] = "{daemon_name},{if_name},{if_addr},j,_,{client_resolve}",
+	helo_macrolist[] = "{tls_version},{cipher},{cipher_bits},{cert_subject},{cert_issuer},{verify},{server_name},{server_addr}",
+	envfrom_macrolist[] = "i,{auth_type},{auth_authen},{auth_ssf},{auth_authen},{mail_mailer},{mail_host},{mail_addr}",
+	envrcpt_macrolist[] = "{rcpt_mailer},{rcpt_host},{rcpt_addr}";
 
 #if __linux__ || __sun__
 #define	ST_MTIME st_mtime
@@ -280,7 +290,7 @@ static int geoip2_build_summary(struct context *context) {
 #endif /* GEOIP2 */
 
 static void
-setreply_lognotice(int lvl, const char *action_name, struct context *context, const struct action *action) {
+setreply_lognotice(int lvl, struct context *context, const char *action_name, const struct action *action) {
 #ifdef GEOIP2
 	if (action && (action->type != ACTION_WHITELIST))
 		prime_geoip2(context);
@@ -298,13 +308,13 @@ setreply_lognotice(int lvl, const char *action_name, struct context *context, co
 	const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
 
 	if (context->quarantine) {
-		msg(lvl, context, "%s L%d @%s: %s, HELO: %s, Authen: %s, FROM: %s, "
+		msg(lvl, context, "%s L%d @%s: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
 		    , action_name, context->quarantine_lineno, last_phase_done, context->quarantine,
-		    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
+		    context->tls_status, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
@@ -313,13 +323,13 @@ setreply_lognotice(int lvl, const char *action_name, struct context *context, co
 		return;
 	}
 
-	msg(lvl, context, "%s L%d @%s: %s%sHELO: %s, Authen: %s, FROM: %s, "
+	msg(lvl, context, "%s L%d @%s: %s%sTLS: %s, HELO: %s, Authen: %s, FROM: %s, "
 	    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 	    ", GeoIP2: %s"
 #endif
 	    , action_name, context->action_lineno, last_phase_done, (action && action->msg) ? action->msg : "", (action && action->msg && action->msg[0]) ? ", " : "",
-	    context->helo, context->auth_authen, context->env_from, context->env_rcpt,
+	    context->tls_status, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 	    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 	    , geoip2_result_summary
@@ -338,11 +348,11 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 
 	switch (action->type) {
 	case ACTION_REJECT:
-		setreply_lognotice(LOG_NOTICE, "REJECT", context, action);
+		setreply_lognotice(LOG_NOTICE, context, "REJECT", action);
 		result = SMFIS_REJECT;
 		break;
 	case ACTION_TEMPFAIL:
-		setreply_lognotice(LOG_NOTICE, "TEMPFAIL", context, action);
+		setreply_lognotice(LOG_NOTICE, context, "TEMPFAIL", action);
 		result = SMFIS_TEMPFAIL;
 		break;
 	case ACTION_QUARANTINE:
@@ -357,13 +367,13 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 		 */
 		break;
 	case ACTION_DISCARD:
-		setreply_lognotice(LOG_NOTICE, "DISCARD", context, action);
+		setreply_lognotice(LOG_NOTICE, context, "DISCARD", action);
 		result = SMFIS_DISCARD;
 		break;
 	case ACTION_WHITELIST:
 	case ACTION_ACCEPT:
 		context->been_syslogged = 1;
-		setreply_lognotice(LOG_DEBUG, action->type == ACTION_WHITELIST ? "WHITELIST" : "ACCEPT", context, action);
+		setreply_lognotice(LOG_DEBUG, context, action->type == ACTION_WHITELIST ? "WHITELIST" : "ACCEPT", action);
 		result = SMFIS_ACCEPT;
 		break;
 	}
@@ -543,32 +553,25 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 	}
 	eval_clear(context, COND_CONNECT);
 	if ((action = eval_cond(context, COND_CONNECT,
-				context->host_name, context->host_addr)) != NULL) {
-		setreply(ctx, context, COND_CONNECT, action);
-		return SMFIS_CONTINUE; /* can't end eval in cb_connect */
-	}
+				context->host_name, context->host_addr)) != NULL)
+		return setreply(ctx, context, COND_CONNECT, action);
 
 #ifdef GEOIP2
 	eval_clear(context, COND_CONNECTGEO);
 	if ((action = eval_cond(context, COND_CONNECTGEO,
-				context->host_addr, NULL)) != NULL) {
-		setreply(ctx, context, COND_CONNECT, action);
-		return SMFIS_CONTINUE; /* can't end eval in cb_connect */
-	}
+				context->host_addr, NULL)) != NULL)
+		return setreply(ctx, context, COND_CONNECT, action);
 #endif
 
 	if ((action = eval_end(context, COND_CONNECT,
 	    COND_MACRO)) !=
-	    NULL) {
-		setreply(ctx, context, COND_CONNECT, action);
-		return SMFIS_CONTINUE; /* can't end eval in cb_connect */
-	}
+	    NULL)
+		return setreply(ctx, context, COND_CONNECT, action);
+
 #ifdef GEOIP2
 	if ((action = eval_end(context, COND_CONNECTGEO,
-			       COND_MACRO)) != NULL) {
-		setreply(ctx, context, COND_CONNECT, action);
-		return SMFIS_CONTINUE; /* can't end eval in cb_connect */
-	}
+			       COND_MACRO)) != NULL)
+		return setreply(ctx, context, COND_CONNECT, action);
 #endif
 
 	context->action_result = SMFIS_CONTINUE;
@@ -587,10 +590,26 @@ cb_helo(SMFICTX *ctx, char *arg)
 		return (SMFIS_ACCEPT);
 	}
 
-	if (context->action_result != SMFIS_CONTINUE)
-		return context->action_result;
+	{
+		const char *TLS_verify = smfi_getsymval(ctx, (char *)"{verify}");
+		if (TLS_verify) {
+			if (! strcmp(TLS_verify,"NO"))
+				strlcpy(context->tls_status, "NOCERT", sizeof(context->tls_status));
+			else if (! strcmp(TLS_verify,"OK"))
+				strlcpy(context->tls_status, "OKCERT", sizeof(context->tls_status));
+			else
+				strlcpy(context->tls_status, TLS_verify, sizeof(context->tls_status));
+		} else
+			strlcpy(context->tls_status, "OFF", sizeof(context->tls_status));
+	}
 
 	strlcpy(context->helo, arg, sizeof(context->helo));
+
+	if (context->action_result == SMFIS_ACCEPT)
+		return SMFIS_CONTINUE;
+	else if (context->action_result != SMFIS_CONTINUE)
+		return context->action_result;
+
 	msg(LOG_DEBUG, context, "cb_helo('%s')", arg);
 	/* multiple HELO imply RSET in sendmail */
 
@@ -636,6 +655,10 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	}
 
 #endif
+
+	if (*args != NULL)
+		strlcpy(context->env_from, *args, sizeof(context->env_from));
+
 	if (context->action_result == SMFIS_ACCEPT)
 		return SMFIS_CONTINUE;
 
@@ -643,7 +666,6 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	eval_clear(context, COND_ENVFROM);
 	if (*args != NULL) {
 		msg(LOG_DEBUG, context, "cb_envfrom('%s')", *args);
-		strlcpy(context->env_from, *args, sizeof(context->env_from));
 		if ((action = eval_cond(context, COND_ENVFROM,
 		    *args, NULL)) != NULL)
 			return (setreply(ctx, context, COND_ENVFROM, action));
@@ -668,17 +690,21 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 		return (SMFIS_ACCEPT);
 	}
 
-	if (context->action_result == SMFIS_ACCEPT)
+	if (*args != NULL) {
+		if (context->env_rcpt[0])
+			strlcat(context->env_rcpt, " ",
+				sizeof(context->env_rcpt));
+		strlcat(context->env_rcpt, *args, sizeof(context->env_rcpt));
+	}
+
+	if (context->action_result == SMFIS_ACCEPT) {
 		return SMFIS_CONTINUE;
+	}
 
 	/* multiple RCPT TO: possible */
 	eval_clear(context, COND_ENVRCPT);
 	if (*args != NULL) {
 		msg(LOG_DEBUG, context, "cb_envrcpt('%s')", *args);
-		if (context->env_rcpt[0])
-			strlcat(context->env_rcpt, " ",
-			    sizeof(context->env_rcpt));
-		strlcat(context->env_rcpt, *args, sizeof(context->env_rcpt));
 		if ((action = eval_cond(context, COND_ENVRCPT,
 		    *args, NULL)) != NULL)
 			return (setreply(ctx, context, COND_ENVRCPT, action));
@@ -703,13 +729,6 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 		return (SMFIS_ACCEPT);
 	}
 
-	if (context->action_result == SMFIS_ACCEPT)
-		return SMFIS_CONTINUE;
-
-	msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
-	if ((action = eval_end(context, COND_MACRO,
-	    COND_HEADER)) != NULL)
-		return (setreply(ctx, context, COND_HEADER, action));
 	if (!strcasecmp(name, "From"))
 		strlcpy(context->hdr_from, value, sizeof(context->hdr_from));
 	else if (!strcasecmp(name, "To"))
@@ -717,6 +736,14 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	else if (!strcasecmp(name, "Subject"))
 		strlcpy(context->hdr_subject, value,
 		    sizeof(context->hdr_subject));
+
+	if (context->action_result == SMFIS_ACCEPT)
+		return SMFIS_CONTINUE;
+
+	msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
+	if ((action = eval_end(context, COND_MACRO,
+	    COND_HEADER)) != NULL)
+		return (setreply(ctx, context, COND_HEADER, action));
 	if ((action = eval_cond(context, COND_HEADER,
 	    name, value)) != NULL)
 		return (setreply(ctx, context, COND_HEADER, action));
@@ -817,7 +844,7 @@ cb_eom(SMFICTX *ctx)
 			result = setreply(ctx, context, COND_BODY, action);
 		else {
 			context->been_syslogged = 1;
-			setreply_lognotice(LOG_DEBUG, "ACCEPT", context, 0);
+			setreply_lognotice(LOG_DEBUG, context, "ACCEPT", 0);
 		}
 		if (context->action_result == SMFIS_ACCEPT)
 			result = SMFIS_ACCEPT;
@@ -844,7 +871,7 @@ cb_eom(SMFICTX *ctx)
 	}
 
 	if (context->quarantine != NULL) {
-		setreply_lognotice(LOG_NOTICE, "QUARANTINE", context, 0);
+		setreply_lognotice(LOG_NOTICE, context, "QUARANTINE", 0);
 		if (smfi_quarantine(ctx, context->quarantine) != MI_SUCCESS)
 			msg(LOG_ERR, context, "cb_eom: smfi_quarantine");
 	}
@@ -856,6 +883,17 @@ cb_eom(SMFICTX *ctx)
 	}
 
 	return (result);
+}
+
+static sfsistat
+cb_abort(SMFICTX *ctx) {
+	struct context *context;
+
+	context = (struct context *)smfi_getpriv(ctx);
+	msg(LOG_DEBUG, context, "cb_abort()");
+	if (context != NULL)
+		context->message_aborted = 1;
+	return SMFIS_CONTINUE;
 }
 
 static sfsistat
@@ -882,18 +920,18 @@ cb_close(SMFICTX *ctx)
 			const char *action_name;
 			char action_name_upcased[64];
 			if (context->action_type == ACTION_NONE)
-				action_name = "CLOSED/NOACTION";
+				action_name = context->message_aborted ? "ABORTED/NOACTION" : "CLOSED/NOACTION";
 			else {
 				action_name = lookup_action_name(context->action_type);
-				strcpy(action_name_upcased,"CLOSED/");
-				for (char *cp = action_name_upcased + strlen("CLOSED/");; ++cp, ++action_name) {
+				strcpy(action_name_upcased,context->message_aborted ? "ABORTED/" : "CLOSED/");
+				for (char *cp = action_name_upcased + strlen(action_name_upcased);; ++cp, ++action_name) {
 					*cp = toupper(*action_name);
 					if (! *action_name)
 						break;
 				}
 				action_name = action_name_upcased;
 			}
-			setreply_lognotice(LOG_INFO, action_name, context, 0);
+			setreply_lognotice(LOG_INFO, context, action_name, 0);
 		}
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
@@ -913,10 +951,31 @@ cb_close(SMFICTX *ctx)
 	return (SMFIS_CONTINUE);
 }
 
+static sfsistat
+cb_negotiate(SMFICTX *ctx,
+	     __attribute__((unused)) unsigned long actions,
+	     __attribute__((unused)) unsigned long steps,
+	     __attribute__((unused)) unsigned long unused0,
+	     __attribute__((unused)) unsigned long unused1,
+	     __attribute__((unused)) unsigned long *actions_output,
+	     __attribute__((unused)) unsigned long *steps_output,
+	     __attribute__((unused)) unsigned long *unused0_output,
+	     __attribute__((unused)) unsigned long *unused1_output) {
+	if (smfi_setsymlist(ctx, SMFIM_CONNECT, (char *)connect_macrolist) != MI_SUCCESS)
+		msg(LOG_ERR,0,"smfi_setsymlist(CONNECT)");
+	if (smfi_setsymlist(ctx, SMFIM_HELO, (char *)helo_macrolist) != MI_SUCCESS)
+		msg(LOG_ERR,0,"smfi_setsymlist(HELO)");
+	if (smfi_setsymlist(ctx, SMFIM_ENVFROM, (char *)envfrom_macrolist) != MI_SUCCESS)
+		msg(LOG_ERR,0,"smfi_setsymlist(ENVFROM)");
+	if (smfi_setsymlist(ctx, SMFIM_ENVRCPT, (char *)envrcpt_macrolist) != MI_SUCCESS)
+		msg(LOG_ERR,0,"smfi_setsymlist(ENVRCPT)");
+	return SMFIS_CONTINUE;
+}
+
 struct smfiDesc smfilter = {
 	.xxfi_name = (char *)"milter-regex",	/* filter name */
 	.xxfi_version = SMFI_VERSION,	/* version code -- do not change */
-	.xxfi_flags = SMFIF_QUARANTINE|SMFIF_ADDHDRS, /* flags */
+	.xxfi_flags = SMFIF_QUARANTINE|SMFIF_ADDHDRS|SMFIF_SETSYMLIST, /* flags */
 	.xxfi_connect = cb_connect,	/* connection info filter */
 	.xxfi_helo = cb_helo,	/* SMTP HELO command filter */
 	.xxfi_envfrom = cb_envfrom,	/* envelope sender filter */
@@ -925,11 +984,11 @@ struct smfiDesc smfilter = {
 	.xxfi_eoh = cb_eoh,		/* end of header */
 	.xxfi_body = cb_body,	/* body block */
 	.xxfi_eom = cb_eom,		/* end of message */
-	.xxfi_abort = NULL,		/* message aborted */
+	.xxfi_abort = cb_abort,		/* message aborted */
 	.xxfi_close = cb_close,	/* connection cleanup */
 	.xxfi_unknown = NULL,
 	.xxfi_data = NULL,
-	.xxfi_negotiate = NULL
+	.xxfi_negotiate = cb_negotiate
 };
 
 void

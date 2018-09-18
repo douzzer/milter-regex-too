@@ -9,6 +9,7 @@ struct context {
 	char		 buf[2048];	/* longer body lines are wrapped */
 	unsigned	 pos;		/* write position within buf */
 	char		 my_name[128];
+	char		 tls_status[16];
 	char		 message_id[64];
 	char		 host_name[128];
 	char		 host_addr[64];
@@ -27,6 +28,7 @@ struct context {
 	char		*quarantine;
 	int		 quarantine_lineno;
 	int		 been_syslogged;
+	int		 message_aborted;
 #ifdef GEOIP2
 	int geoip2_lookup_ret;
 	struct MMDB_lookup_result_s *geoip2_result;
