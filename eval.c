@@ -326,6 +326,7 @@ eval_end(struct context *context, int type, int max)
 {
 	struct ruleset *rs = context->rs;
 	int *res = context->res;
+	struct action *ret = &default_action;
 
 	struct cond_list *cl;
 	struct action_list *al;
@@ -333,11 +334,6 @@ eval_end(struct context *context, int type, int max)
 	eval_mutex_lock();
 
 	context->last_phase_done = type;
-	struct action *phasedone_action = eval_cond_1(context, COND_PHASEDONE, 0, 0);
-	if (phasedone_action) {
-		eval_mutex_unlock();
-		return phasedone_action;
-	}
 
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 		if (res[cl->cond->idx] == VAL_UNDEF)
@@ -351,13 +347,14 @@ eval_end(struct context *context, int type, int max)
 		if (type == COND_PHASEDONE)
 			continue;
 		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
-			if (res[cl->cond->idx] == VAL_UNDEF) {
-				eval_mutex_unlock();
-				return (NULL);
-			}
+			if (res[cl->cond->idx] == VAL_UNDEF)
+				break;
 	}
+
+	ret = eval_cond_1(context, COND_PHASEDONE, 0, 0);
+
 	eval_mutex_unlock();
-	return (&default_action);
+	return ret;
 }
 
 void
