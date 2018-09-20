@@ -308,13 +308,13 @@ setreply_lognotice(int lvl, struct context *context, const char *action_name, co
 	const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
 
 	if (context->quarantine) {
-		msg(lvl, context, "%s L%d @%s: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
+		msg(lvl, context, "%s L%d @%s: %s, PTR: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
 		    , action_name, context->quarantine_lineno, last_phase_done, context->quarantine,
-		    context->tls_status, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
+		    context->client_resolve, context->tls_status, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 		    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 		    , geoip2_result_summary
@@ -323,13 +323,13 @@ setreply_lognotice(int lvl, struct context *context, const char *action_name, co
 		return;
 	}
 
-	msg(lvl, context, "%s L%d @%s: %s%sTLS: %s, HELO: %s, Authen: %s, FROM: %s, "
+	msg(lvl, context, "%s L%d @%s: %s%sPTR: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
 	    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 	    ", GeoIP2: %s"
 #endif
 	    , action_name, context->action_lineno, last_phase_done, (action && action->msg) ? action->msg : "", (action && action->msg && action->msg[0]) ? ", " : "",
-	    context->tls_status, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
+	    context->client_resolve, context->tls_status, context->helo, context->auth_authen, context->env_from, context->env_rcpt,
 	    context->hdr_from, context->hdr_to, context->hdr_subject
 #ifdef GEOIP2
 	    , geoip2_result_summary
@@ -496,6 +496,11 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 		const char *j_name = smfi_getsymval(ctx, (char *)"j");
 		if (j_name)
 			strlcpy(context->my_name, j_name, sizeof(context->my_name));
+	}
+	{
+		const char *client_resolve = smfi_getsymval(ctx, (char *)"{client_resolve}");
+		if (client_resolve)
+			strlcpy(context->client_resolve, client_resolve, sizeof(context->client_resolve));
 	}
 
 	context->rs = get_ruleset();
@@ -836,9 +841,7 @@ cb_eom(SMFICTX *ctx)
 		geoip2_result_summary = "";
 #endif
 
-	if (context->action_result == SMFIS_ACCEPT)
-		result = SMFIS_ACCEPT;
-	else {
+	if (context->action_result != SMFIS_ACCEPT) {
 		if ((action = eval_end(context, COND_BODY,
 				       COND_MAX)) != NULL)
 			result = setreply(ctx, context, COND_BODY, action);
@@ -850,7 +853,7 @@ cb_eom(SMFICTX *ctx)
 			result = SMFIS_ACCEPT;
 	}
 
-	if ((! context->quarantine) && ((context->action_type == ACTION_ACCEPT) || (context->action_type == ACTION_WHITELIST))) {
+	if ((! context->quarantine) && (result == SMFIS_ACCEPT)) {
 		const char *if_addr;
 		if (context->auth_authen[0]
 		    || smfi_getsymval(ctx, (char *)"{auth_authen}")

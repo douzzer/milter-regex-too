@@ -373,7 +373,7 @@ eval_clear(struct context *context, int type)
 }
 
 static int
-check_cond(__attribute__((unused)) struct context *context, struct cond *c, const char *a, const char *b)
+check_cond(struct context *context, struct cond *c, const char *a, const char *b)
 {
 #ifdef GEOIP2
 	/* if this is a GeoIP rule, the first arg is the path, not a regexp, and the second arg is always null, to be replaced with the GeoIP leaf. */
@@ -417,9 +417,6 @@ check_cond(__attribute__((unused)) struct context *context, struct cond *c, cons
 					matched = -1;
 				else if ((r == REG_NOMATCH) == c->args[1].not)
 					matched = 0;
-#ifdef GEOIP2_TEST
-				fprintf(stderr,"CONNECTGEO %s %s %s -> %s matched=%d\n",context->host_addr,c->args[0].src,c->args[1].src,s_nulltermed,matched);
-#endif
 				free(s_nulltermed);
 				if (matched <= 0)
 					break;
@@ -437,13 +434,15 @@ check_cond(__attribute__((unused)) struct context *context, struct cond *c, cons
 		if ((! c->args[0].src) || c->args[0].empty) /* nonsense existence check */
 			return c->args[0].not;
 		if (context->last_phase_done == COND_NONE)
-			return -1;
+			return 1;
 		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
 		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
-		if (r)
-			return -1; /* last_phase_done evolves, so REG_NOMATCH mustn't be treated as final. */
+		if (r && r != REG_NOMATCH)
+			return -1;
+		else if ((r == REG_NOMATCH) != c->args[0].not)
+			return 1;
 		else
-			return c->args[0].not;
+			return 0;
 	}
 
 	for (int i = 0; i < 2; ++i) {

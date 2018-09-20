@@ -9,6 +9,7 @@ struct context {
 	char		 buf[2048];	/* longer body lines are wrapped */
 	unsigned	 pos;		/* write position within buf */
 	char		 my_name[128];
+	char		 client_resolve[16];
 	char		 tls_status[16];
 	char		 message_id[64];
 	char		 host_name[128];
