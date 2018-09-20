@@ -471,7 +471,8 @@ check_macros(SMFICTX *ctx, struct context *context, const char *phase)
 		if (strcmp(macro[i].phase, phase))
 			continue;
 		v = smfi_getsymval(ctx, (char *)macro[i].name); /* may be null.  allow testing for that. */
-		msg(LOG_DEBUG, context, "macro %s = %s", macro[i].name, v ? v : "<unset>");
+		if (debug)
+			msg(LOG_DEBUG, context, "macro %s = %s", macro[i].name, v ? v : "<unset>");
 		if ((action = eval_cond(context, COND_MACRO,
 		    macro[i].name, v)) != NULL)
 			return (action);
@@ -745,7 +746,8 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	if (context->action_result == SMFIS_ACCEPT)
 		return SMFIS_CONTINUE;
 
-	msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
+	if (debug)
+		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
 	if ((action = eval_end(context, COND_MACRO,
 	    COND_HEADER)) != NULL)
 		return (setreply(ctx, context, COND_HEADER, action));
@@ -804,7 +806,8 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 			else
 				context->buf[context->pos] = 0;
 			context->pos = 0;
-			msg(LOG_DEBUG, context, "cb_body('%s')", context->buf);
+			if (debug)
+				msg(LOG_DEBUG, context, "cb_body('%s')", context->buf);
 			if ((action = eval_cond(context,
 			    COND_BODY, context->buf, NULL)) != NULL)
 				return (setreply(ctx, context, COND_BODY, action));
