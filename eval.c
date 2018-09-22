@@ -38,6 +38,7 @@ static const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei 
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "milter-regex.h"
 
@@ -59,7 +60,9 @@ static int	 build_geoip2_path(struct cond_arg *);
 #endif
 static void	 free_expr_list(struct expr_list *, struct expr *);
 
+#if 0
 static pthread_mutex_t	 eval_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 static struct action	 default_action;
 
 int
@@ -70,6 +73,8 @@ eval_init(int type)
 	return 0;
 }
 
+#define eval_mutex_lock()
+#if 0
 static void
 eval_mutex_lock(void)
 {
@@ -77,7 +82,10 @@ eval_mutex_lock(void)
 	if (rv)
 		die_with_errno(rv,"pthread_mutex_lock");
 }
+#endif
 
+#define eval_mutex_unlock()
+#if 0
 static void
 eval_mutex_unlock(void)
 {
@@ -85,6 +93,7 @@ eval_mutex_unlock(void)
 	if (rv)
 		die_with_errno(rv,"pthread_mutex_unlock");
 }
+#endif
 
 struct ruleset *
 create_ruleset(void)
@@ -310,20 +319,31 @@ eval_cond_1(struct context *context, int type,
 	return (NULL);
 }
 
+static long long int now_usecs(void) {
+	if (! debug)
+		return 0;
+	struct timeval now;
+	(void)gettimeofday(&now,0);
+	return ((long long int)now.tv_sec * 1000000LL) + (long long int)now.tv_usec;
+}
+
 struct action *
 eval_cond(struct context *context, int type,
     const char *a, const char *b)
 {
-	struct action *ret;
+	long long int start_at = now_usecs();
 	eval_mutex_lock();
-	ret = eval_cond_1(context,type,a,b);
+	struct action *ret = eval_cond_1(context,type,a,b);
 	eval_mutex_unlock();
+	if (debug)
+		context->eval_time_cum += now_usecs() - start_at;
 	return ret;
 }
 
 struct action *
-eval_end(struct context *context, int type, int max)
+eval_end(struct context *context, int type, __attribute__((unused)) int max)
 {
+	long long int start_at = now_usecs();
 	struct ruleset *rs = context->rs;
 	int *res = context->res;
 	struct action *ret = &default_action;
@@ -341,8 +361,11 @@ eval_end(struct context *context, int type, int max)
 	for (al = rs->action; al != NULL; al = al->next)
 		if (res[al->action->idx] == VAL_TRUE) {
 			eval_mutex_unlock();
+			if (debug)
+				context->eval_time_cum += now_usecs() - start_at;
 			return (al->action);
 		}
+#if 0
 	for (type = max; type < COND_MAX; ++type) {
 		if (type == COND_PHASEDONE)
 			continue;
@@ -350,16 +373,20 @@ eval_end(struct context *context, int type, int max)
 			if (res[cl->cond->idx] == VAL_UNDEF)
 				break;
 	}
+#endif
 
 	ret = eval_cond_1(context, COND_PHASEDONE, 0, 0);
 
 	eval_mutex_unlock();
+	if (debug)
+		context->eval_time_cum += now_usecs() - start_at;
 	return ret;
 }
 
 void
 eval_clear(struct context *context, int type)
 {
+	long long int start_at = now_usecs();
 	struct ruleset *rs = context->rs;
 	int *res = context->res;
 
@@ -370,11 +397,14 @@ eval_clear(struct context *context, int type)
 		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 			push_cond_result(cl->cond, VAL_UNDEF, res);
 	eval_mutex_unlock();
+	if (debug)
+		context->eval_time_cum += now_usecs() - start_at;
 }
 
 static int
 check_cond(struct context *context, struct cond *c, const char *a, const char *b)
 {
+	++context->check_cond_count;
 #ifdef GEOIP2
 	/* if this is a GeoIP rule, the first arg is the path, not a regexp, and the second arg is always null, to be replaced with the GeoIP leaf. */
 

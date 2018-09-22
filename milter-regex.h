@@ -2,8 +2,14 @@
 #define MILTER_REGEX_H
 
 #include "eval.h"
+#include <libmilter/mfapi.h>
 
 struct context {
+	long long int	 created_at;
+	unsigned long	 smfi_phases;
+	long long int	 eval_time_cum;
+	int		 check_cond_count;
+	enum { MESSAGE_INPROGRESS=0, MESSAGE_ABORTED, MESSAGE_COMPLETED } message_status;
 	struct ruleset	*rs;
 	int		*res;
 	char		 buf[2048];	/* longer body lines are wrapped */
@@ -21,15 +27,10 @@ struct context {
 	char		 hdr_from[128];
 	char		 hdr_to[128];
 	char		 hdr_subject[128];
-	int		 last_phase_done;
-	int		 action_type;
-	int		 action_result;
-	int		 action_lineno;
-	int		 whitelist;
-	char		*quarantine;
-	int		 quarantine_lineno;
-	int		 been_syslogged;
-	int		 message_aborted;
+	cond_t		 last_phase_done;
+	const struct action *action;
+	sfsistat	 action_result;
+	long long int	 action_at;
 #ifdef GEOIP2
 	int geoip2_lookup_ret;
 	struct MMDB_lookup_result_s *geoip2_result;
@@ -46,6 +47,9 @@ extern void __die(const char *fn, int lineno, int this_errno, const char *reason
 size_t strlcat(char *dst, const char *src, size_t siz);
 size_t strlcpy(char *dst, const char *src, size_t siz);
 #endif
+
+extern const char gitversion[];
+extern int debug;
 
 #ifdef GEOIP2
 extern const char *geoip2_db_path;

@@ -36,17 +36,17 @@
 #include <regex.h>
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
-enum { COND_NONE=0, COND_MACRO, COND_CONNECT, COND_CONNECTGEO, COND_HELO, COND_ENVFROM, COND_ENVRCPT,
-    COND_HEADER, COND_BODY, COND_PHASEDONE, COND_MAX };
+typedef enum { COND_NONE=0, COND_MACRO, COND_CONNECT, COND_CONNECTGEO, COND_HELO, COND_ENVFROM, COND_ENVRCPT,
+    COND_HEADER, COND_BODY, COND_PHASEDONE, COND_MAX } cond_t;
 enum { EXPR_AND, EXPR_OR, EXPR_NOT, EXPR_COND };
-enum { ACTION_NONE=0, ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
-    ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST };
+typedef enum { ACTION_NONE=0, ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
+    ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST } action_t;
 
 struct expr;
 
 struct cond {
 #ifdef GEOIP2
-	int type; /* COND_MACRO...COND_MAX */
+	cond_t type; /* COND_MACRO...COND_MAX */
 #endif
 	struct cond_arg {
 		char	*src;
@@ -90,7 +90,7 @@ struct expr_list {
 };
 
 struct action {
-	int			 type;
+	action_t		 type;
 	char			*msg;
 	unsigned		 idx;
 	int			 lineno;
@@ -105,7 +105,7 @@ struct ruleset {
 	struct cond_list	*cond[COND_MAX];
 	struct action_list	*action;
 	unsigned		 maxidx;
-	unsigned		 refcnt;
+	int			 refcnt;
 };
 
 int		 eval_init(int);

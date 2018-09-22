@@ -10,9 +10,9 @@ override CFLAGS+=-std=gnu99 -O2 -g -MMD -DGITVERSION='"$(GITVERSION)"' -DGEOIP2 
 
 override LDFLAGS+=-L/usr/local/lib
 
-milter-regex.o: eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
+milter-regex-version.o: milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
 
-milter-regex: milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
+milter-regex: milter-regex-version.o milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
 	$(CC) $(LDFLAGS) -o $@ $+ $(LIBS)
 
 %.o: %.c
