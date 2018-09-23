@@ -608,7 +608,7 @@ build_regex(struct cond_arg *a)
 		}
 	} else {
 		char *u;
-		int flags = 0, r;
+		int flags = REG_EXTENDED, r;
 
 		u = malloc(s - t + 1);
 		if (u == NULL) {
@@ -620,8 +620,11 @@ build_regex(struct cond_arg *a)
 		s++;
 		while (*s) {
 			switch (*s) {
+			case 'b':
+				flags |= REG_BASIC;
+				flags &= ~REG_EXTENDED;
+				break;
 			case 'e':
-				flags |= REG_EXTENDED;
 				break;
 			case 'i':
 				flags |= REG_ICASE;
@@ -636,8 +639,6 @@ build_regex(struct cond_arg *a)
 			}
 			++s;
 		}
-		if (!(flags & REG_EXTENDED))
-			flags |= REG_BASIC;
 		r = regcomp(&a->re, u, flags);
 		if (r) {
 			char e[8192];
