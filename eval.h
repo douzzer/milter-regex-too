@@ -45,9 +45,7 @@ typedef enum { ACTION_NONE=0, ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
 struct expr;
 
 struct cond {
-#ifdef GEOIP2
 	cond_t type; /* COND_MACRO...COND_MAX */
-#endif
 	struct cond_arg {
 		char	*src;
 		int	 empty;

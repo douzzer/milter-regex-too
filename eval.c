@@ -146,8 +146,8 @@ create_cond(struct ruleset *rs, int type, const char *a, const char *b)
 			c->args[0].src = strdup(a);
 			if (c->args[0].src == NULL)
 				goto error;
-#ifdef GEOIP2
 			c->type = type;
+#ifdef GEOIP2
 			if (type == COND_CONNECTGEO) {
 				if (build_geoip2_path(&c->args[0]))
 					goto error;
