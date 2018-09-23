@@ -978,7 +978,8 @@ cb_eom(SMFICTX *ctx)
 		(void)geoip2_build_summary(context);
 	const char *geoip2_result_summary;
 	if (context->geoip2_result_summary) {
-		if ((! context->action) || (context->action->type != ACTION_WHITELIST))
+		if (((result == SMFIS_ACCEPT) || (result == SMFIS_CONTINUE)) &&
+		    ((! context->action) || (context->action->type != ACTION_WHITELIST)))
 			(void)smfi_insheader(ctx, 0, (char *)"X-GeoIP2-Summary", context->geoip2_result_summary);
 		geoip2_result_summary = strchr(context->geoip2_result_summary,'/');
 		if (! geoip2_result_summary)
