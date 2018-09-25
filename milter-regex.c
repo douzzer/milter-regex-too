@@ -59,7 +59,6 @@ static const char rcsid[] = "$Id: milter-regex.c,v 1.9 2011/11/21 12:13:33 dhart
 static const char	*rule_file_name = "/etc/milter-regex.conf";
 int		 debug = 0;
 static int starting_up = 1;
-static pthread_mutex_t	 ruleset_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef GEOIP2
 const char *geoip2_db_path = 0;
@@ -128,28 +127,6 @@ static const char
 	helo_macrolist[] = "{tls_version},{cipher},{cipher_bits},{cert_subject},{cert_issuer},{verify},{server_name},{server_addr}",
 	envfrom_macrolist[] = "i,{auth_type},{auth_authen},{auth_ssf},{auth_authen},{mail_mailer},{mail_host},{mail_addr}",
 	envrcpt_macrolist[] = "{rcpt_mailer},{rcpt_host},{rcpt_addr}";
-
-#if __linux__ || __sun__
-#define	ST_MTIME st_mtime
-#else
-#define	ST_MTIME st_mtimespec
-#endif
-
-static void
-ruleset_mutex_lock(void)
-{
-	int rv = pthread_mutex_lock(&ruleset_mutex);
-	if (rv)
-		die_with_errno(rv,"pthread_mutex_lock");
-}
-
-static void
-ruleset_mutex_unlock(void)
-{
-	int rv = pthread_mutex_unlock(&ruleset_mutex);
-	if (rv)
-		die_with_errno(rv,"pthread_mutex_unlock");
-}
 
 #ifdef __sun__
 int
@@ -462,44 +439,109 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 		return SMFIS_CONTINUE;
 }
 
+#if __linux__ || __sun__
+#define	ST_MTIME_SEC st_mtime
+#ifdef st_mtime
+#define ST_MTIME_NSEC st_mtim.tv_nsec
+#else
+#define	ST_MTIME_NSEC st_mtimensec;
+#endif
+#else
+#define	ST_MTIME_SEC st_mtime
+#if __BSD_VISIBLE
+#define ST_MTIME_NSEC st_mtimespec.tv_nsec
+#else
+#define ST_MTIME_NSEC __st_mtimensec
+#endif
+#endif
+
+static pthread_mutex_t	 ruleset_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+ruleset_mutex_lock(void)
+{
+	int rv = pthread_mutex_lock(&ruleset_mutex);
+	if (rv)
+		die_with_errno(rv,"pthread_mutex_lock");
+}
+
+static void
+ruleset_mutex_unlock(void)
+{
+	int rv = pthread_mutex_unlock(&ruleset_mutex);
+	if (rv)
+		die_with_errno(rv,"pthread_mutex_unlock");
+}
+
 static struct stat sbo;
 
 static struct ruleset *
 get_ruleset(void)
 {
 	static struct ruleset *rs[MAXRS] = {};
-	static int cur = 0;
+	static int cur = -1;
 	static time_t last_check = 0;
 	time_t t = time(NULL);
 	int load = 0;
 
 	ruleset_mutex_lock();
-	if (!last_check)
-		memset(&sbo, 0, sizeof(sbo));
+
 	if (t - last_check >= 10) {
+		if (! last_check)
+			memset(&sbo, 0, sizeof(sbo));
+
 		struct stat sb;
 
 		last_check = t;
-		memset(&sb, 0, sizeof(sb));
+
 		if (stat(rule_file_name, &sb))
 			msg(LOG_ERR, NULL, "get_ruleset: stat: %s: %s",
 			    rule_file_name, strerror(errno));
-		else if (memcmp(&sb.ST_MTIME, &sbo.ST_MTIME,
-		    sizeof(sb.ST_MTIME))) {
-			memcpy(&sbo.ST_MTIME, &sb.ST_MTIME,
-			    sizeof(sb.ST_MTIME));
+		else if ((sb.ST_MTIME_SEC != sbo.ST_MTIME_SEC)
+			 || (sb.ST_MTIME_NSEC != sbo.ST_MTIME_NSEC)
+			 || (sb.st_ino != sbo.st_ino)
+			 || (sb.st_dev != sbo.st_dev)) {
+			sbo = sb;
 			load = 1;
 		}
 	}
-	if (load || rs[cur] == NULL) {
+
+	if (load || (cur < 0) || (rs[cur] == NULL)) {
 		int i;
 		char err[8192];
+		int new_cur = -1;
 
-		int n_old_rs = 0;
 		for (i = 0; i < MAXRS; ++i) {
-			if (! rs[i])
+			if (rs[i] == NULL) {
+				new_cur = i;
+				break;
+			}
+		}
+
+		if (new_cur < 0) {
+			msg(LOG_ERR, NULL, "all rulesets are in use (max %d), cannot "
+			    "load new one", MAXRS);
+			goto skip_load;
+		}
+
+		msg(LOG_DEBUG, NULL, "%sloading configuration file %s", (cur >= 0) ? "re" : "", rule_file_name);
+
+		if (parse_ruleset(rule_file_name, &rs[new_cur], err,
+		    sizeof(err)) || rs[new_cur] == NULL) {
+			msg(LOG_ERR, NULL, "parse_ruleset: %s", err);
+			if (rs[new_cur]) {
+				free_ruleset(rs[new_cur]);
+				rs[new_cur] = 0;
+			}
+		} else {
+			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
+			    "successfully, mtime %lld", rule_file_name, (cur >= 0) ? "re" : "", (long long int)sbo.st_mtime);
+			cur = new_cur;
+		}
+
+		for (i = 0; i < MAXRS; ++i) {
+			if ((! rs[i]) || (i == cur))
 				continue;
-			++n_old_rs;
 			if (rs[i]->refcnt == 0) {
 				msg(LOG_DEBUG, NULL, "freeing unused ruleset "
 				    "%d/%d", i, MAXRS);
@@ -507,32 +549,16 @@ get_ruleset(void)
 				rs[i] = NULL;
 			}
 		}
-		msg(LOG_DEBUG, NULL, "%sloading configuration file %s", n_old_rs ? "re" : "", rule_file_name);
-		for (i = 0; i < MAXRS; ++i)
-			if (rs[i] == NULL)
-				break;
-		if (i == MAXRS)
-			msg(LOG_ERR, NULL, "all rulesets are in use (max %d), cannot "
-			    "load new one", MAXRS);
-		else if (parse_ruleset(rule_file_name, &rs[i], err,
-		    sizeof(err)) || rs[i] == NULL) {
-			msg(LOG_ERR, NULL, "parse_ruleset: %s", err);
-			if (rs[i]) {
-				free_ruleset(rs[i]);
-				rs[i] = 0;
-			}
-		} else {
-			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
-			    "successfully, mtime %lld", rule_file_name, n_old_rs ? "re" : "", (long long int)sbo.st_mtime);
-			cur = i;
-		}
 	}
 
-	if (rs[cur])
+	skip_load:
+
+	if ((cur >= 0) && rs[cur])
 		++rs[cur]->refcnt;
 
 	ruleset_mutex_unlock();
-	return (rs[cur]);
+
+	return ((cur >= 0) ? rs[cur] : 0);
 }
 
 static void release_ruleset(struct ruleset *rs) {
