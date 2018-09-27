@@ -1140,7 +1140,7 @@ msg(int priority, struct context *context, const char *fmt, ...)
 				break;
 			}
 		}
-		printf("%s %lld %+lld.%03lld ms: %s\n", priorityname, created_at / 1000000LL, usecs_elapsed/1000LL, usecs_elapsed%1000LL, msgbuf);
+		fprintf(stderr,"%s %lld %+lld.%03lld ms: %s\n", priorityname, created_at / 1000000LL, usecs_elapsed/1000LL, usecs_elapsed%1000LL, msgbuf);
 	} else if (starting_up && (priority <= LOG_NOTICE))
 		fprintf(stderr,"%s\n", msgbuf);
 	else
@@ -1151,7 +1151,7 @@ msg(int priority, struct context *context, const char *fmt, ...)
 static void
 usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s [-d] [-c config] [-u user] [-p pipe]"
+	fprintf(stderr, "usage: %s [-d] [-x] [-c config] [-u user] [-p pipe]"
 #ifdef GEOIP2
 		" [-g <path to GeoIP2 db file>]"
 #endif
@@ -1181,14 +1181,15 @@ main(int argc, char **argv)
 	const char *jail = NULL;
 	sfsistat r = MI_FAILURE;
 	const char *ofile = NULL;
+	int exit_after_load_flag = 0;
 
 	tzset();
 
 	while ((ch = getopt(argc, argv,
 #ifdef GEOIP2
-		"c:dj:p:u:g:"
+		"c:dj:p:u:g:x"
 #else
-		"c:dj:p:u:"
+		"c:dj:p:u:x"
 #endif
 		)) != -1) {
 		switch (ch) {
@@ -1206,6 +1207,10 @@ main(int argc, char **argv)
 			break;
 		case 'u':
 			user = optarg;
+			break;
+		case 'x':
+			debug = 1;
+			exit_after_load_flag = 1;
 			break;
 #ifdef GEOIP2
 		case 'g':
@@ -1279,6 +1284,11 @@ main(int argc, char **argv)
 	if (geoip2_db_path && geoip2_opendb(geoip2_db_path) < 0)
 		exit(1);
 #endif
+
+	if (exit_after_load_flag) {
+		fprintf(stderr,"Exiting after successful initialization.\n");
+		exit(0);
+	}
 
 	if (smfi_setconn((char *)oconn) != MI_SUCCESS) {
 		fprintf(stderr, "smfi_setconn: %s: failed\n", oconn);
