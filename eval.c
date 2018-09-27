@@ -39,6 +39,7 @@ static const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei 
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <ctype.h>
 
 #include "milter-regex.h"
 
@@ -610,6 +611,46 @@ build_regex(struct cond_arg *a)
 		char *u;
 		int flags = REG_EXTENDED, r;
 
+#ifdef __BSD_VISIBLE
+		/* kludge until migration to PCRE2 */
+		{
+			int n_wordedges = 0;
+			for (const char *cp = t; cp < s; ++cp) {
+				if ((*cp == '\\') && ((*(cp+1) == 'b') || (*(cp+1) == '<') || (*(cp+1) == '>')))
+					++n_wordedges;
+			}
+			u = malloc(s - t + 1 + (n_wordedges * (sizeof "[[:<:]]" - sizeof "\\b")));
+			for (char *in = (char *)t, *out = u; ; ) {
+				if (in == s) {
+					*out = 0;
+					break;
+				}
+				if (*in == '\\') {
+					switch (*(in+1)) {
+					case 'b':
+						/* guesswork */
+						if (isalnum(*(in+2)) || (*(in+2) == '_') || (*(in+2) == '(') || (*(in+2) == '['))
+							strcpy(out,"[[:<:]]");
+						else
+							strcpy(out,"[[:>:]]");
+						break;
+					case '<':
+						strcpy(out,"[[:<:]]");
+						break;
+					case '>':
+						strcpy(out,"[[:>:]]");
+						break;
+					default:
+						*out++ = *in++;
+						continue;
+					}
+					out += strlen("[[:<:]]");
+					in += 2;
+				} else
+					*out++ = *in++;
+			}
+		}
+#else
 		u = malloc(s - t + 1);
 		if (u == NULL) {
 			yyerror("build_regex: malloc: %s", strerror(errno));
@@ -617,6 +658,7 @@ build_regex(struct cond_arg *a)
 		}
 		memcpy(u, t, s - t);
 		u[s - t] = 0;
+#endif
 		s++;
 		while (*s) {
 			switch (*s) {
