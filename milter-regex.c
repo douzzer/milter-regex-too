@@ -806,6 +806,18 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	if (*args != NULL)
 		strlcpy(context->env_from, *args, sizeof(context->env_from));
 
+	/* if this is another go-round with a new envfrom, clear out
+	 * any residual action that pivoted on a previous envfrom or
+	 * subsequent message attribute.
+	 */
+	if (context->action &&
+	    (context->last_phase_done != COND_CONNECT) &&
+	    (context->last_phase_done != COND_CONNECTGEO) &&
+	    (context->last_phase_done != COND_HELO)) {
+		msg(LOG_DEBUG, context, "cleared cached action for repeat cb_envfrom()");
+		context->action = 0;
+	}
+
 	if (context->action)
 		return SMFIS_CONTINUE;
 
