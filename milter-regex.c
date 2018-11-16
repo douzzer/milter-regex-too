@@ -119,6 +119,8 @@ static const struct {
 	{ COND_ENVRCPT, "{rcpt_mailer}" },
 	{ COND_ENVRCPT, "{rcpt_host}" },
 	{ COND_ENVRCPT, "{rcpt_addr}" },
+	{ COND_ENVRCPT, "{AddressFilter_results}" },
+	{ COND_HEADER, "{AddressFilter_results_eoh}" },
 	{ COND_NONE, NULL }
 };
 
@@ -126,7 +128,8 @@ static const char
 	connect_macrolist[] = "{daemon_name},{if_name},{if_addr},j,_,{client_resolve}",
 	helo_macrolist[] = "{tls_version},{cipher},{cipher_bits},{cert_subject},{cert_issuer},{verify},{server_name},{server_addr}",
 	envfrom_macrolist[] = "i,{auth_type},{auth_authen},{auth_ssf},{auth_authen},{mail_mailer},{mail_host},{mail_addr}",
-	envrcpt_macrolist[] = "{rcpt_mailer},{rcpt_host},{rcpt_addr}";
+	envrcpt_macrolist[] = "{rcpt_mailer},{rcpt_host},{rcpt_addr},{AddressFilter_results}",
+	eoh_macrolist[] = "{AddressFilter_results_eoh}";
 
 #ifdef __sun__
 int
@@ -624,6 +627,8 @@ cb_negotiate(SMFICTX *ctx,
 		msg(LOG_ERR,0,"smfi_setsymlist(ENVFROM)");
 	if (smfi_setsymlist(ctx, SMFIM_ENVRCPT, (char *)envrcpt_macrolist) != MI_SUCCESS)
 		msg(LOG_ERR,0,"smfi_setsymlist(ENVRCPT)");
+	if (smfi_setsymlist(ctx, SMFIM_EOH, (char *)eoh_macrolist) != MI_SUCCESS)
+		msg(LOG_ERR,0,"smfi_setsymlist(EOH)");
 
 	if (phases_offered & SMFIP_SKIP)
 		*phases_requested |= SMFIP_SKIP;
@@ -936,6 +941,10 @@ cb_eoh(SMFICTX *ctx)
 		return SMFIS_CONTINUE;
 
 	msg(LOG_DEBUG, context, "cb_eoh()");
+
+	if ((action = check_macros(ctx, context, COND_HEADER)) != NULL)
+		return setreply(ctx, context, COND_HEADER, action);
+
 	memset(context->buf, 0, sizeof(context->buf));
 	context->pos = 0;
 
