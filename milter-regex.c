@@ -119,7 +119,8 @@ static const struct {
 	{ COND_ENVRCPT, "{rcpt_mailer}" },
 	{ COND_ENVRCPT, "{rcpt_host}" },
 	{ COND_ENVRCPT, "{rcpt_addr}" },
-	{ COND_ENVRCPT, "{AddressFilter_results}" },
+	{ COND_ENVRCPT, "{AddressFilter_A_results}" },
+	{ COND_ENVRCPT, "{AddressFilter_D_results}" },
 	{ COND_HEADER, "{AddressFilter_results_eoh}" },
 	{ COND_NONE, NULL }
 };
@@ -128,7 +129,7 @@ static const char
 	connect_macrolist[] = "{daemon_name},{if_name},{if_addr},j,_,{client_resolve}",
 	helo_macrolist[] = "{tls_version},{cipher},{cipher_bits},{cert_subject},{cert_issuer},{verify},{server_name},{server_addr}",
 	envfrom_macrolist[] = "i,{auth_type},{auth_authen},{auth_ssf},{auth_authen},{mail_mailer},{mail_host},{mail_addr}",
-	envrcpt_macrolist[] = "{rcpt_mailer},{rcpt_host},{rcpt_addr},{AddressFilter_results}",
+	envrcpt_macrolist[] = "{rcpt_mailer},{rcpt_host},{rcpt_addr},{AddressFilter_A_results},{AddressFilter_D_results}",
 	eoh_macrolist[] = "{AddressFilter_results_eoh}";
 
 #ifdef __sun__
