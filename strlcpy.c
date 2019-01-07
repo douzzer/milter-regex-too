@@ -17,7 +17,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-static const char rcsid[] = "$Id: strlcpy.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei Exp $";
+static __attribute__((unused)) const char rcsid[] = "$Id: strlcpy.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei Exp $";
 
 #include <sys/types.h>
 #include <string.h>

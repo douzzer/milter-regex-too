@@ -32,7 +32,7 @@
  *
  */
 
-static const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei Exp $";
+static __attribute__((unused)) const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/01/11 15:49:52 dhartmei Exp $";
 
 #include <errno.h>
 #include <pthread.h>

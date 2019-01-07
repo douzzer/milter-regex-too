@@ -30,7 +30,7 @@
  *
  */
 
-static const char rcsid[] = "$Id: milter-regex.c,v 1.9 2011/11/21 12:13:33 dhartmei Exp $";
+static __attribute__((unused)) const char rcsid[] = "$Id: milter-regex.c,v 1.9 2011/11/21 12:13:33 dhartmei Exp $";
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -918,9 +918,6 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 
 	if (debug)
 		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
-	if ((action = eval_end(context, COND_MACRO,
-	    COND_HEADER)) != NULL)
-		return (setreply(ctx, context, COND_HEADER, action));
 	if ((action = eval_cond(context, COND_HEADER,
 	    name, value)) != NULL)
 		return (setreply(ctx, context, COND_HEADER, action));
@@ -945,6 +942,10 @@ cb_eoh(SMFICTX *ctx)
 
 	if ((action = check_macros(ctx, context, COND_HEADER)) != NULL)
 		return setreply(ctx, context, COND_HEADER, action);
+
+	if ((action = eval_end(context, COND_MACRO,
+	    COND_HEADER)) != NULL)
+		return (setreply(ctx, context, COND_HEADER, action));
 
 	memset(context->buf, 0, sizeof(context->buf));
 	context->pos = 0;
@@ -1046,7 +1047,7 @@ cb_eom(SMFICTX *ctx)
 			;
 		else {
 			const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
-			char action_msg_buf[128];
+			char action_msg_buf[256];
 			snprintf(action_msg_buf,sizeof action_msg_buf,
 				 "%s%s%s %lld %d %s %d",
 				 context->message_id,

@@ -276,6 +276,8 @@ static int format_one(MMDB_entry_data_s *node, char *buf, size_t buf_spc, const 
 	*s_len = snprintf(buf,buf_spc,"%s",node->boolean ? "true" : "false");
 	return 0;
     }
+    errno = EINVAL;
+    return -1;
 }
 
 /* turn the leaf into regular (UTF8) strings usable with regexps. */
