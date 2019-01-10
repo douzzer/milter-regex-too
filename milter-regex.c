@@ -478,6 +478,7 @@ ruleset_mutex_unlock(void)
 }
 
 static struct stat sbo;
+static typeof(sbo.st_mtime) loaded_ruleset_mtime = 0;
 
 static struct ruleset *
 get_ruleset(void)
@@ -541,6 +542,7 @@ get_ruleset(void)
 			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
 			    "successfully, mtime %lld", rule_file_name, (cur >= 0) ? "re" : "", (long long int)sbo.st_mtime);
 			cur = new_cur;
+			loaded_ruleset_mtime = sbo.st_mtime;
 		}
 
 		for (i = 0; i < MAXRS; ++i) {
@@ -1053,7 +1055,7 @@ cb_eom(SMFICTX *ctx)
 				 context->message_id,
 				 context->message_id[0] ? "@" : "",
 				 context->my_name,
-				 (long long int)sbo.st_mtime,
+				 (long long int)loaded_ruleset_mtime,
 				 context->action ? context->action->lineno : 0,
 				 last_phase_done,
 				 context->check_cond_count);
