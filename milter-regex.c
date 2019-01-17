@@ -332,7 +332,7 @@ setreply_lognotice(struct context *context) {
 	const char *last_phase_done = lookup_cond_name(context->last_phase_done);
 	char done_at[256];
 	if (context->last_phase_done == COND_BODY)
-	  snprintf(done_at,sizeof done_at,"%lu-%lu", context->body_start_offset, context->body_end_offset);
+	  snprintf(done_at,sizeof done_at,"%zu-%zu", context->body_start_offset, context->body_end_offset);
 	else if (context->end_eval_note[0])
 	  snprintf(done_at,sizeof done_at,"%.*s", (int)sizeof context->end_eval_note, context->end_eval_note);
 	else
@@ -1085,7 +1085,7 @@ cb_eom(SMFICTX *ctx)
 			const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
 			char done_at[256];
 			if (context->last_phase_done == COND_BODY)
-			  snprintf(done_at,sizeof done_at,"%lu-%lu", context->body_start_offset, context->body_end_offset);
+			  snprintf(done_at,sizeof done_at,"%zu-%zu", context->body_start_offset, context->body_end_offset);
 			else if (context->end_eval_note[0])
 			  snprintf(done_at,sizeof done_at,"%.*s", (int)sizeof context->end_eval_note, context->end_eval_note);
 			else
