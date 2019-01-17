@@ -330,9 +330,16 @@ setreply_lognotice(struct context *context) {
 #endif
 
 	const char *last_phase_done = lookup_cond_name(context->last_phase_done);
+	char done_at[256];
+	if (context->last_phase_done == COND_BODY)
+	  snprintf(done_at,sizeof done_at,"%lu-%lu", context->body_start_offset, context->body_end_offset);
+	else if (context->end_eval_note[0])
+	  snprintf(done_at,sizeof done_at,"%.*s", (int)sizeof context->end_eval_note, context->end_eval_note);
+	else
+	  snprintf(done_at,sizeof done_at,"-");
 
 	if (debug)
-		msg(lvl, context, "%s L%d %+lld.%03lld ms (cum_eval %lld.%03lld ms, cum_check %d) @%s: %s%sPTR: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
+		msg(lvl, context, "%s L%d %+lld.%03lld ms (cum_eval %lld.%03lld ms, cum_check %d) @%s %.*s: %s%sPTR: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
@@ -345,6 +352,8 @@ setreply_lognotice(struct context *context) {
 		    context->eval_time_cum % 1000LL,
 		    context->check_cond_count,
 		    last_phase_done,
+		    (int)sizeof done_at,
+		    done_at,
 		    (context->action && context->action->msg) ? context->action->msg : "",
 		    (context->action && context->action->msg && context->action->msg[0]) ? ", " : "",
 		    context->client_resolve,
@@ -361,7 +370,7 @@ setreply_lognotice(struct context *context) {
 #endif
 		    );
 	else
-		msg(lvl, context, "%s L%d @%s (%d): %s%sPTR: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
+		msg(lvl, context, "%s L%d @%s %.*s (%d): %s%sPTR: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
 		    "RCPT: %s, From: %s, To: %s, Subject: %s"
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
@@ -369,6 +378,8 @@ setreply_lognotice(struct context *context) {
 		    , action_name,
 		    context->action ? context->action->lineno : 0,
 		    last_phase_done,
+		    (int)sizeof done_at,
+		    done_at,
 		    context->check_cond_count,
 		    (context->action && context->action->msg) ? context->action->msg : "",
 		    (context->action && context->action->msg && context->action->msg[0]) ? ", " : "",
@@ -709,8 +720,10 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 
 	msg(LOG_DEBUG, context, "cb_connect('%s', '%s')",
 	    context->host_name, context->host_addr);
-	if ((action = check_macros(ctx, context, COND_CONNECT)) != NULL)
+	if ((action = check_macros(ctx, context, COND_CONNECT)) != NULL) {
+		strlcpy(context->end_eval_note, "CONNECT-M", sizeof context->end_eval_note);
 		return setreply(ctx, context, COND_CONNECT, action);
+	}
 	eval_clear(context, COND_CONNECT);
 	if ((action = eval_cond(context, COND_CONNECT,
 				context->host_name, context->host_addr)) != NULL)
@@ -768,8 +781,10 @@ cb_helo(SMFICTX *ctx, char *arg)
 	msg(LOG_DEBUG, context, "cb_helo('%s')", arg);
 	/* multiple HELO imply RSET in sendmail */
 
-	if ((action = check_macros(ctx, context, COND_HELO)) != NULL)
+	if ((action = check_macros(ctx, context, COND_HELO)) != NULL) {
+		strlcpy(context->end_eval_note, "HELO-M", sizeof context->end_eval_note);
 		return (setreply(ctx, context, COND_HELO, action));
+	}
 	eval_clear(context, COND_HELO);
 	if ((action = eval_cond(context, COND_HELO,
 	    arg, NULL)) != NULL)
@@ -840,8 +855,10 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	if ((action = eval_end(context, COND_ENVFROM,
 	    COND_MACRO)) != NULL)
 		return (setreply(ctx, context, COND_ENVFROM, action));
-	if ((action = check_macros(ctx, context, COND_ENVFROM)) != NULL)
+	if ((action = check_macros(ctx, context, COND_ENVFROM)) != NULL) {
+		strlcpy(context->end_eval_note, "ENVFROM-M", sizeof context->end_eval_note);
 		return (setreply(ctx, context, COND_ENVFROM, action));
+	}
 
 	return (SMFIS_CONTINUE);
 }
@@ -878,8 +895,10 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 	if ((action = eval_end(context, COND_ENVRCPT,
 	    COND_MACRO)) != NULL)
 		return (setreply(ctx, context, COND_ENVRCPT, action));
-	if ((action = check_macros(ctx, context, COND_ENVRCPT)) != NULL)
+	if ((action = check_macros(ctx, context, COND_ENVRCPT)) != NULL) {
+		strlcpy(context->end_eval_note, "ENVRCPT-M", sizeof context->end_eval_note);
 		return (setreply(ctx, context, COND_ENVRCPT, action));
+	}
 
 	return (SMFIS_CONTINUE);
 }
@@ -920,9 +939,13 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 
 	if (debug)
 		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
+
 	if ((action = eval_cond(context, COND_HEADER,
-	    name, value)) != NULL)
+	    name, value)) != NULL) {
+		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
 		return (setreply(ctx, context, COND_HEADER, action));
+	}
+
 	return (SMFIS_CONTINUE);
 }
 
@@ -942,18 +965,24 @@ cb_eoh(SMFICTX *ctx)
 
 	msg(LOG_DEBUG, context, "cb_eoh()");
 
-	if ((action = check_macros(ctx, context, COND_HEADER)) != NULL)
+	if ((action = check_macros(ctx, context, COND_HEADER)) != NULL) {
+		strlcpy(context->end_eval_note, "EOH-M1", sizeof context->end_eval_note);
 		return setreply(ctx, context, COND_HEADER, action);
+	}
 
 	if ((action = eval_end(context, COND_MACRO,
-	    COND_HEADER)) != NULL)
+	    COND_HEADER)) != NULL) {
+		strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note);
 		return (setreply(ctx, context, COND_HEADER, action));
+	}
 
 	memset(context->buf, 0, sizeof(context->buf));
 	context->pos = 0;
 
-	if ((action = eval_end(context, COND_HEADER, COND_BODY)) != NULL)
+	if ((action = eval_end(context, COND_HEADER, COND_BODY)) != NULL) {
+		strlcpy(context->end_eval_note, "EOH", sizeof context->end_eval_note);
 		return (setreply(ctx, context, COND_HEADER, action));
+	}
 
 	return (SMFIS_CONTINUE);
 }
@@ -975,10 +1004,14 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 			return SMFIS_CONTINUE;
 	}
 
-	for (; size > 0; size--, chunk++) {
+	for (size_t size_at_start_of_line = size; size > 0; size--, chunk++) {
 		context->buf[context->pos] = *chunk;
 		if (context->buf[context->pos] == '\n' ||
 		    context->pos == sizeof(context->buf) - 1) {
+			context->body_start_offset = context->body_end_offset;
+			context->body_end_offset += size_at_start_of_line - size;
+			size_at_start_of_line = size;
+
 			const struct action *action;
 
 			if (context->pos > 0 &&
@@ -1013,6 +1046,7 @@ cb_eom(SMFICTX *ctx)
 	context->message_status = MESSAGE_COMPLETED;
 
 	if (! context->action) {
+		context->body_start_offset = context->body_end_offset;
 		if ((action = eval_end(context, COND_BODY,
 				       COND_MAX)) != NULL)
 			(void)setreply(ctx, context, COND_BODY, action);
@@ -1049,15 +1083,24 @@ cb_eom(SMFICTX *ctx)
 			;
 		else {
 			const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
-			char action_msg_buf[256];
+			char done_at[256];
+			if (context->last_phase_done == COND_BODY)
+			  snprintf(done_at,sizeof done_at,"%lu-%lu", context->body_start_offset, context->body_end_offset);
+			else if (context->end_eval_note[0])
+			  snprintf(done_at,sizeof done_at,"%.*s", (int)sizeof context->end_eval_note, context->end_eval_note);
+			else
+			  snprintf(done_at,sizeof done_at,"-");
+			char action_msg_buf[512];
 			snprintf(action_msg_buf,sizeof action_msg_buf,
-				 "%s%s%s %lld %d %s %d",
+				 "%s%s%s %lld %d %s %.*s %d",
 				 context->message_id,
 				 context->message_id[0] ? "@" : "",
 				 context->my_name,
 				 (long long int)loaded_ruleset_mtime,
 				 context->action ? context->action->lineno : 0,
 				 last_phase_done,
+				 (int)sizeof done_at,
+				 done_at,
 				 context->check_cond_count);
 			(void)smfi_insheader(ctx, 0, (char *)"X-Milter-Regex-Decision-Trace", action_msg_buf);
 		}

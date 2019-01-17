@@ -27,6 +27,9 @@ struct context {
 	char		 hdr_from[128];
 	char		 hdr_to[128];
 	char		 hdr_subject[128];
+	char		 end_eval_note[128];
+	size_t		 body_start_offset;
+	size_t		 body_end_offset;
 	cond_t		 last_phase_done;
 	const struct action *action;
 	sfsistat	 action_result;
