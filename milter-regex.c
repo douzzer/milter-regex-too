@@ -331,10 +331,10 @@ setreply_lognotice(struct context *context) {
 
 	const char *last_phase_done = lookup_cond_name(context->last_phase_done);
 	char done_at[256];
-	if (context->last_phase_done == COND_BODY)
-	  snprintf(done_at,sizeof done_at,"%zu-%zu", context->body_start_offset, context->body_end_offset);
-	else if (context->end_eval_note[0])
+	if (context->end_eval_note[0])
 	  snprintf(done_at,sizeof done_at,"%.*s", (int)sizeof context->end_eval_note, context->end_eval_note);
+	else if (context->last_phase_done == COND_BODY)
+	  snprintf(done_at,sizeof done_at,"%zu-%zu", context->body_start_offset, context->body_end_offset);
 	else
 	  snprintf(done_at,sizeof done_at,"-");
 
@@ -1048,15 +1048,19 @@ cb_eom(SMFICTX *ctx)
 	if (! context->action) {
 		context->body_start_offset = context->body_end_offset;
 		if ((action = eval_end(context, COND_BODY,
-				       COND_MAX)) != NULL)
+				       COND_MAX)) != NULL) {
+			strlcpy(context->end_eval_note, "EOM", sizeof context->end_eval_note);
 			(void)setreply(ctx, context, COND_BODY, action);
+		}
 	}
 
 	sfsistat result;
 	if (context->action)
 		result = context->action_result;
-	else
+	else {
+		strlcpy(context->end_eval_note, "FALLTHROUGH", sizeof context->end_eval_note);
 		result = SMFIS_ACCEPT;
+	}
 
 #ifdef GEOIP2
 	if (context->geoip2_result && (! context->geoip2_result_summary))
@@ -1084,10 +1088,10 @@ cb_eom(SMFICTX *ctx)
 		else {
 			const char *last_phase_done = context ? lookup_cond_name(context->last_phase_done) : "?";
 			char done_at[256];
-			if (context->last_phase_done == COND_BODY)
-			  snprintf(done_at,sizeof done_at,"%zu-%zu", context->body_start_offset, context->body_end_offset);
-			else if (context->end_eval_note[0])
+			if (context->end_eval_note[0])
 			  snprintf(done_at,sizeof done_at,"%.*s", (int)sizeof context->end_eval_note, context->end_eval_note);
+			else if (context->last_phase_done == COND_BODY)
+			  snprintf(done_at,sizeof done_at,"%zu-%zu", context->body_start_offset, context->body_end_offset);
 			else
 			  snprintf(done_at,sizeof done_at,"-");
 			char action_msg_buf[512];
