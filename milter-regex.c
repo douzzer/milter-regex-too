@@ -53,12 +53,15 @@ static __attribute__((unused)) const char rcsid[] = "$Id: milter-regex.c,v 1.9 2
 #ifdef __linux__
 #include <grp.h>
 #endif
+#include <signal.h>
 
 #include "milter-regex.h"
 
 static const char	*rule_file_name = "/etc/milter-regex.conf";
+static const char *pid_file = "/var/run/milter-regex.pid";
 int		 debug = 0;
 static int starting_up = 1;
+
 
 #ifdef GEOIP2
 const char *geoip2_db_path = 0;
@@ -1259,9 +1262,9 @@ main(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv,
 #ifdef GEOIP2
-		"c:dj:p:u:g:x"
+		"c:dj:p:u:g:xP:"
 #else
-		"c:dj:p:u:x"
+		"c:dj:p:u:xP:"
 #endif
 		)) != -1) {
 		switch (ch) {
@@ -1270,6 +1273,7 @@ main(int argc, char **argv)
 			break;
 		case 'd':
 			debug = 1;
+			pid_file = 0;
 			break;
 		case 'j':
 			jail = optarg;
@@ -1289,6 +1293,12 @@ main(int argc, char **argv)
 			geoip2_db_path = optarg;
 			break;
 #endif
+		case 'P':
+		  if (*optarg)
+		    pid_file = optarg;
+		  else
+		    pid_file = 0;
+		  break;
 		default:
 			usage(argv[0]);
 		}
@@ -1297,6 +1307,20 @@ main(int argc, char **argv)
 		fprintf(stderr, "unknown command line argument: %s ...",
 		    argv[optind]);
 		usage(argv[0]);
+	}
+
+	if (pid_file) {
+	  FILE *f = fopen(pid_file,"r");
+	  if (f) {
+	    pid_t pid;
+	    if (fscanf(f,"%d",&pid) == 1) {
+	      if (kill(pid,0) == 0) {
+		fprintf(stderr,"milter-regex already running with PID %d.\n",pid);
+		exit(1);
+	      }
+	    }
+	    fclose(f);
+	  }
 	}
 
 	if (! debug)
@@ -1382,6 +1406,21 @@ main(int argc, char **argv)
 		perror("daemon");
 		goto done;
 	}
+
+	if (pid_file) {
+	  FILE *f = fopen(pid_file,"w");
+	  if (f) {
+	    if (fprintf(f,"%d\n",getpid()) < 0) {
+	      fprintf(stderr,"%s: %s\n",pid_file,strerror(errno));
+	      pid_file = 0;
+	    }
+	    fclose(f);
+	  } else {
+	    fprintf(stderr,"%s: %s\n",pid_file,strerror(errno));
+	    pid_file = 0;
+	  }
+	}
+
 	umask(0177);
 
 	starting_up = 0;
@@ -1405,5 +1444,8 @@ main(int argc, char **argv)
 #endif
 
 done:
+	if (pid_file)
+	  (void)unlink(pid_file);
+
 	return (r);
 }
