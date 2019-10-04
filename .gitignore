@@ -1,0 +1,5 @@
+*.d
+*.o
+milter-regex
+*.cat?
+parse.tab.?

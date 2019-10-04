@@ -1,4 +1,5 @@
 # $Id: Makefile.linux,v 1.3 2011/07/16 13:51:34 dhartmei Exp $
+SHELL=/bin/bash
 
 LIBS=  -lmaxminddb -lmilter -lpthread
 
@@ -6,9 +7,17 @@ all: milter-regex milter-regex.cat8
 
 GITVERSION=$(shell git describe --always --dirty; git log -1 --date=iso --format='%cd %an <%aE>')
 
-override CFLAGS+=-std=gnu99 -O2 -g -MMD -DGITVERSION='"$(GITVERSION)"' -DGEOIP2 -DYYERROR_VERBOSE=1 -I/usr/local/include -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
+ifdef NO_GMIME
+	GMIME_CFLAGS=
+	GMIME_LDFLAGS=
+else
+	GMIME_CFLAGS=-DUSE_GMIME $(shell pkg-config --cflags gmime-3.0)
+	GMIME_LDFLAGS=$(shell pkg-config --libs gmime-3.0)
+endif
 
-override LDFLAGS+=-L/usr/local/lib
+override CFLAGS+=-std=gnu99 -O2 -g -MMD -DGITVERSION='"$(GITVERSION)"' -DGEOIP2 -DYYERROR_VERBOSE=1 -I/usr/local/include $(GMIME_CFLAGS) -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
+
+override LDFLAGS+=-L/usr/local/lib $(GMIME_LDFLAGS)
 
 milter-regex-version.o: milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
 

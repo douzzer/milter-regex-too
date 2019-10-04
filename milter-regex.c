@@ -55,6 +55,11 @@ static __attribute__((unused)) const char rcsid[] = "$Id: milter-regex.c,v 1.9 2
 #endif
 #include <signal.h>
 
+#ifdef USE_GMIME
+#include <gmime/gmime.h>
+#include <gmime/gmime-utils.h>
+#endif
+
 #include "milter-regex.h"
 
 static const char	*rule_file_name = "/etc/milter-regex.conf";
@@ -925,6 +930,28 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 		return (SMFIS_ACCEPT);
 	}
 
+#ifdef USE_GMIME
+	char *decoded = 0;
+	char *rawvalue = 0;
+
+	if (strstr(value,"=?") &&
+	    ((!strcasecmp(name, "From")) ||
+	     (!strcasecmp(name, "To")) ||
+	     (!strcasecmp(name, "Subject")))) {
+
+	  /* see https://securityintelligence.com/news/security-vulnerabilities-in-rfc-1342-enable-spoofing-and-code-injection-attacks/
+	   * and https://tools.ietf.org/html/rfc2047 "MIME (Multipurpose Internet Mail Extensions) Part Three:
+	   *   Message Header Extensions for Non-ASCII Text" (the current version of the encoding/protocol).
+	   */
+
+	  decoded = g_mime_utils_header_decode_text(0 /* GMimeParserOptions */,value);
+	  if (decoded) {
+	    rawvalue = value;
+	    value = decoded;
+	  }
+	}
+#endif
+
 	if (!strcasecmp(name, "From")) {
 		strlcpy(context->hdr_from, value, sizeof(context->hdr_from));
 		zap_ctrls(context->hdr_from);
@@ -940,14 +967,40 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	if (context->action)
 		return SMFIS_CONTINUE;
 
-	if (debug)
-		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
+	if (debug) {
+#ifdef USE_GMIME
+	  if (rawvalue) {
+	    msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, rawvalue);
+	    msg(LOG_DEBUG, context, "DECODED cb_header('%s', '%s')", name, value);
+	  } else
+#endif
+	    msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
+	}
+
+#ifdef USE_GMIME
+	/* match first on the raw value, to allow matching on verbatim charsets. */
+	if (rawvalue && (action = eval_cond(context, COND_HEADER,
+	    name, rawvalue)) != NULL) {
+		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
+		free(decoded);
+		return (setreply(ctx, context, COND_HEADER, action));
+	}
+#endif
 
 	if ((action = eval_cond(context, COND_HEADER,
 	    name, value)) != NULL) {
 		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
+#ifdef USE_GMIME
+		if (decoded)
+		  free(decoded);
+#endif
 		return (setreply(ctx, context, COND_HEADER, action));
 	}
+
+#ifdef USE_GMIME
+	if (decoded)
+	  free(decoded);
+#endif
 
 	return (SMFIS_CONTINUE);
 }
@@ -1259,6 +1312,10 @@ main(int argc, char **argv)
 	int exit_after_load_flag = 0;
 
 	tzset();
+
+#ifdef USE_GMIME
+	g_mime_init();
+#endif
 
 	while ((ch = getopt(argc, argv,
 #ifdef GEOIP2
