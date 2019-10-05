@@ -1531,8 +1531,13 @@ main(int argc, char **argv)
 #endif
 
 done:
-	if (pid_file)
-	  (void)unlink(pid_file);
+	if (pid_file) {
+		if (unlink(pid_file) < 0) {
+			msg(LOG_ERR, NULL, "unlink(%s)",pid_file);
+			if (truncate(pid_file,(off_t)0) < 0)
+				msg(LOG_ERR, NULL, "ftruncate(%s)",pid_file);
+		}
+	}
 
 	return (r);
 }
