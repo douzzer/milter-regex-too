@@ -934,7 +934,10 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	}
 
 #ifdef USE_GMIME
-	char *decoded = 0;
+	_Pragma("GCC diagnostic push");
+	_Pragma("GCC diagnostic ignored \"-Wfree-nonheap-object\"")
+	__attribute__((__cleanup__(free))) char *decoded = 0;
+	_Pragma("GCC diagnostic pop");
 	char *rawvalue = 0;
 
 	if (strstr(value,"=?") &&
@@ -985,7 +988,6 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	if (rawvalue && (action = eval_cond(context, COND_HEADER,
 	    name, rawvalue)) != NULL) {
 		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
-		free(decoded);
 		return (setreply(ctx, context, COND_HEADER, action));
 	}
 #endif
@@ -993,10 +995,6 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	if ((action = eval_cond(context, COND_HEADER,
 	    name, value)) != NULL) {
 		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
-#ifdef USE_GMIME
-		if (decoded)
-		  free(decoded);
-#endif
 		return (setreply(ctx, context, COND_HEADER, action));
 	}
 
@@ -1007,12 +1005,6 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	if ((action = eval_end(context, COND_CONNECTGEO,
 			       COND_MACRO)) != NULL)
 		return setreply(ctx, context, COND_CONNECTGEO, action);
-#endif
-
-
-#ifdef USE_GMIME
-	if (decoded)
-	  free(decoded);
 #endif
 
 	return (SMFIS_CONTINUE);
