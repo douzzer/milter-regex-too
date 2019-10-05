@@ -632,7 +632,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 				for (int i=1; i<8; ++i) {
 					if (addr_matches[i].rm_so == -1)
-						break;
+						continue;
 					size_t match_len = addr_matches[i].rm_eo - addr_matches[i].rm_so;
 					if (match_len >= sizeof abuf)
 						continue;
