@@ -934,10 +934,12 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	}
 
 #ifdef USE_GMIME
-	_Pragma("GCC diagnostic push");
-	_Pragma("GCC diagnostic ignored \"-Wfree-nonheap-object\"")
-	__attribute__((__cleanup__(free))) char *decoded = 0;
-	_Pragma("GCC diagnostic pop");
+	void cleanup_free(char **p) {
+		if (*p)
+			free(*p);
+	}
+	__attribute__((__cleanup__(cleanup_free))) char *decoded = 0;
+
 	char *rawvalue = 0;
 
 	if (strstr(value,"=?") &&
