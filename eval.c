@@ -542,7 +542,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if (context->geoip2_lookup_ret < 0)
 			return c->args[1].not ? 0 : 1; /* IP lookup failed -- fail closed. */
 		if (! context->geoip2_result) {
-			context->geoip2_result = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result_cache);
+			context->geoip2_result = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result_cache, 0);
 			if (! context->geoip2_result) {
 				context->geoip2_lookup_ret = -1;
 				return c->args[1].not ? 0 : 1;
@@ -636,10 +636,15 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					size_t match_len = addr_matches[i].rm_eo - addr_matches[i].rm_so;
 					if (match_len >= sizeof abuf)
 						continue;
+					if (match_len < 4)
+						continue;
 					memcpy(abuf, b_ptr + addr_matches[i].rm_so, match_len);
 					abuf[match_len] = 0;
+					if ((strspn(abuf,"0123456789.") != match_len) &&
+					    (strspn(abuf,"0123456789abcdefABCDEF:") != match_len))
+						continue;
 
-					struct MMDB_lookup_result_s *geo = geoip2_lookup(geoip2_db_path, abuf, &context->geoip2_result_cache);
+					struct MMDB_lookup_result_s *geo = geoip2_lookup(geoip2_db_path, abuf, &context->geoip2_result_cache, 1);
 
 					if (! geo)
 						continue;

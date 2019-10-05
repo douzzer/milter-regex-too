@@ -70,7 +70,7 @@ extern const char *geoip2_db_path;
 struct MMDB_lookup_result_s;
 struct MMDB_entry_data_list_s;
 extern int geoip2_opendb(const char *mmdb_path);
-extern struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip_address, struct MMDB_lookup_result_ll **cache);
+extern struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip_address, struct MMDB_lookup_result_ll **cache, int quiet_p);
 extern int geoip2_pick_leaf(struct MMDB_lookup_result_s *result, const char * const *lookup_path, struct MMDB_entry_data_list_s **leaf);
 extern int geoip2_iterate_leaf(struct MMDB_entry_data_list_s **leaf, char *buf, size_t buf_spc, const char **s, int *s_len);
 extern int geoip2_free_leaf(struct MMDB_entry_data_list_s *leaf);

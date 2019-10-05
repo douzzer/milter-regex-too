@@ -182,7 +182,7 @@ prime_geoip2(struct context *context)
 {
 	if (geoip2_db_path) {
 		if ((! context->geoip2_result) && (! context->geoip2_lookup_ret)) {
-			context->geoip2_result = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result_cache);
+			context->geoip2_result = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result_cache, 0);
 			if (! context->geoip2_result) {
 				context->geoip2_lookup_ret = -1;
 				return -1;

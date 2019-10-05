@@ -85,7 +85,7 @@ int geoip2_closedb(void) {
     return 0;
 }
 
-struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip_address, struct MMDB_lookup_result_ll **cache) {
+struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip_address, struct MMDB_lookup_result_ll **cache, int quiet_p) {
     if (strlen(ip_address) >= sizeof (*cache)->addr) {
 	errno = EINVAL;
 	return 0;
@@ -202,7 +202,8 @@ struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip
     cacheent->result = MMDB_lookup_string(&static_mmdb, ip_address, &my_gai_error, &mmdb_error);
 
     if (my_gai_error != 0) {
-        msg(LOG_ERR, 0, "geoip2_lookup() MMDB_lookup_string() getaddrinfo(%s): %s", ip_address, gai_strerror(my_gai_error));
+	if (! quiet_p)
+	    msg(LOG_NOTICE, 0, "geoip2_lookup() MMDB_lookup_string() getaddrinfo(%s): %s", ip_address, gai_strerror(my_gai_error));
 	goto err_out;
     }
 
