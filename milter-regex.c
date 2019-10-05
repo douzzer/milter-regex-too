@@ -1385,6 +1385,7 @@ main(int argc, char **argv)
 		usage(argv[0]);
 	}
 
+	int have_stale_pid_file = 0;
 	if (pid_file && (! exit_after_load_flag)) {
 	  FILE *f = fopen(pid_file,"r");
 	  if (f) {
@@ -1396,6 +1397,7 @@ main(int argc, char **argv)
 	      }
 	    }
 	    fclose(f);
+	    have_stale_pid_file = 1;
 	  }
 	}
 
@@ -1422,6 +1424,16 @@ main(int argc, char **argv)
 		perror("chroot");
 		return (1);
 	}
+
+	FILE *pid_stream = 0;
+	if (pid_file && (! exit_after_load_flag)) {
+		pid_stream = fopen(pid_file, have_stale_pid_file ? "w" : "wx");
+		if (! pid_stream) {
+			fprintf(stderr,"%s: %s\n",pid_file,strerror(errno));
+			exit(1);
+		}
+	}
+
 	if (user) {
 		struct passwd *pw;
 
@@ -1430,6 +1442,11 @@ main(int argc, char **argv)
 			fprintf(stderr, "getpwnam(%s): %s\n", user,
 				errno ? strerror(errno) : "no such user");
 			return (1);
+		}
+
+		if (pid_stream) {
+			if (fchown(fileno(pid_stream),pw->pw_uid,pw->pw_gid) < 0)
+				fprintf(stderr, "fchown(%s,%d,%d): %s\n",pid_file,pw->pw_uid,pw->pw_gid,strerror(errno));
 		}
 		if (setgroups(1, &pw->pw_gid)) {
 			perror("setgroups");
@@ -1463,15 +1480,6 @@ main(int argc, char **argv)
 	if (exit_after_load_flag) {
 		fprintf(stderr,"Exiting after successful initialization.\n");
 		exit(0);
-	}
-
-	FILE *pid_stream = 0;
-	if (pid_file) {
-		pid_stream = fopen(pid_file,"wx");
-		if (! pid_stream) {
-			fprintf(stderr,"%s: %s\n",pid_file,strerror(errno));
-			exit(1);
-		}
 	}
 
 	if (smfi_setconn((char *)oconn) != MI_SUCCESS) {
