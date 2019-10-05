@@ -1464,6 +1464,8 @@ main(int argc, char **argv)
 	  if (! rs)
 	    exit(1);
 	  release_ruleset(rs);
+	  if (exit_after_load_flag)
+		  free_ruleset(rs);
 	}
 
 #ifdef GEOIP2

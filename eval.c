@@ -1030,7 +1030,7 @@ free_ruleset(struct ruleset *rs)
 			if (c != NULL) {
 				int j;
 
-				for (j = 0; j < 2; ++j)
+				for (j = 0; j < 4; ++j)
 					if (c->args[j].src != NULL) {
 						free(c->args[j].src);
 						if (!c->args[j].empty)
