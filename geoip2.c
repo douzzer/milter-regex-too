@@ -19,7 +19,6 @@
 #define NO_PROTO
 
 #include "milter-regex.h"
-#include <maxminddb.h>
 
 static pthread_rwlock_t db_lock = PTHREAD_RWLOCK_INITIALIZER;
 static volatile int db_ok = 0;
@@ -86,11 +85,26 @@ int geoip2_closedb(void) {
     return 0;
 }
 
-int geoip2_lookup(const char *mmdb_path, const char *ip_address,
-		  MMDB_lookup_result_s **result) {
+struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip_address, struct MMDB_lookup_result_ll **cache) {
+    if (strlen(ip_address) >= sizeof (*cache)->addr) {
+	errno = EINVAL;
+	return 0;
+    }
+    for (struct MMDB_lookup_result_ll *i = *cache;
+	 i;
+	 i = i->next) {
+	if (! strcasecmp(ip_address,i->addr)) {
+	    if (! i->result.found_entry) {
+		errno = ENOENT;
+		return 0;
+	    }
+	    return &i->result;
+	}
+    }
+
     int rv;
     enum { FOR_NOTHING, FOR_READ, FOR_WRITE } db_locked = FOR_NOTHING;
-    *result = 0;
+    struct MMDB_lookup_result_ll *cacheent = 0;
 
     if (! db_ok)
 	goto go_straight_to_write;
@@ -118,15 +132,18 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 		    die_with_errno(rv, "geoip2_lookup() pthread_rwlock_unlock()");
 		db_locked = FOR_NOTHING;
 	    }
+
 	    if (db_locked != FOR_WRITE) {
 	    go_straight_to_write:
+		if (geoip2_cache_release(cache) < 0)
+		    die_with_errno(errno, "geoip2_lookup() geoip2_cache_release()");
 		if (db_locked != FOR_NOTHING)
 		    die_with_errno(-1,"geoip2_lookup() attempt to double-lock db_lock");
 		if ((rv=pthread_rwlock_trywrlock(&db_lock))) {
 		    msg(LOG_NOTICE, NULL, "geoip2_lookup() pthread_rwlock_trywrlock(): %s",strerror(rv));
 		    if (! db_ok) {
 			errno = rv;
-			return -1;
+			return 0;
 		    }
 		    mmdb_path = 0;
 		    goto open_read_only;
@@ -160,6 +177,11 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 			msg(LOG_ERR, NULL, "geoip2_opendb() MMDB_open(): error reopening \"%s\": %s", mmdb_path, MMDB_strerror(status));
 		}
 	    }
+
+	    if ((rv=pthread_rwlock_unlock(&db_lock)))
+		die_with_errno(rv, "geoip2_lookup() pthread_rwlock_unlock()");
+	    db_locked = FOR_NOTHING;
+	    goto open_read_only;
 	}
     }
 
@@ -171,13 +193,13 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
     if (db_locked == FOR_NOTHING)
 	die_with_errno(-1,"attempt to access db without a lock");
 
-    *result = malloc(sizeof(MMDB_lookup_result_s));
-    if (! *result)
+    cacheent = malloc(sizeof **cache);
+    if (! cacheent)
 	goto err_out;
 
     int my_gai_error, mmdb_error;
 
-    **result = MMDB_lookup_string(&static_mmdb, ip_address, &my_gai_error, &mmdb_error);
+    cacheent->result = MMDB_lookup_string(&static_mmdb, ip_address, &my_gai_error, &mmdb_error);
 
     if (my_gai_error != 0) {
         msg(LOG_ERR, 0, "geoip2_lookup() MMDB_lookup_string() getaddrinfo(%s): %s", ip_address, gai_strerror(my_gai_error));
@@ -189,20 +211,22 @@ int geoip2_lookup(const char *mmdb_path, const char *ip_address,
 	goto err_out;
     }
 
-    if (! (*result)->found_entry) {
+    cacheent->next = *cache;
+    *cache = cacheent;
+
+    if (! cacheent->result.found_entry) {
 	errno = ENOENT;
-	goto err_out;
+	return 0;
     }
-    return 0;
+
+    return &cacheent->result;
 
 err_out:
-    if (*result) {
-	free(*result);
-	*result = 0;
-    }
+    if (cacheent)
+	free(cacheent);
     if ((rv=pthread_rwlock_unlock(&db_lock)))
 	die_with_errno(rv, "geoip2_lookup() pthread_rwlock_unlock()");
-    return -1;
+    return 0;
 }
 
 int geoip2_pick_leaf(MMDB_lookup_result_s *result, const char * const *lookup_path, MMDB_entry_data_list_s **leaf) {
@@ -300,12 +324,18 @@ int geoip2_free_leaf(MMDB_entry_data_list_s *leaf) {
     return 0;
 }
 
-int geoip2_release(MMDB_lookup_result_s **result) {
-    free(*result);
-    *result = 0;
-    int rv = pthread_rwlock_unlock(&db_lock);
-    if (rv)
-	die_with_errno(rv, "geoip2_release() pthread_rwlock_unlock()");
+int geoip2_cache_release(struct MMDB_lookup_result_ll **cache) {
+    for (struct MMDB_lookup_result_ll *i = *cache,
+	     *next;
+	 i;
+	 i = next) {
+	next = i->next;
+	free(i);
+	int rv = pthread_rwlock_unlock(&db_lock);
+	if (rv)
+	    die_with_errno(rv, "geoip2_cache_release() pthread_rwlock_unlock()");
+    }
+    *cache = 0;
     return 0;
 }
 

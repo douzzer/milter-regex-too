@@ -4,6 +4,16 @@
 #include "eval.h"
 #include <libmilter/mfapi.h>
 
+#ifdef GEOIP2
+#include <maxminddb.h>
+
+struct MMDB_lookup_result_ll {
+	struct MMDB_lookup_result_ll *next;
+	char addr[64];
+	struct MMDB_lookup_result_s result;
+};
+#endif
+
 struct context {
 	long long int	 created_at;
 	unsigned long	 smfi_phases;
@@ -38,6 +48,7 @@ struct context {
 	int geoip2_lookup_ret;
 	struct MMDB_lookup_result_s *geoip2_result;
 	char *geoip2_result_summary;
+	struct MMDB_lookup_result_ll *geoip2_result_cache;
 #endif
 };
 
@@ -59,11 +70,11 @@ extern const char *geoip2_db_path;
 struct MMDB_lookup_result_s;
 struct MMDB_entry_data_list_s;
 extern int geoip2_opendb(const char *mmdb_path);
-extern int geoip2_lookup(const char *mmdb_path, const char *ip_address, struct MMDB_lookup_result_s **result);
+extern struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip_address, struct MMDB_lookup_result_ll **cache);
 extern int geoip2_pick_leaf(struct MMDB_lookup_result_s *result, const char * const *lookup_path, struct MMDB_entry_data_list_s **leaf);
 extern int geoip2_iterate_leaf(struct MMDB_entry_data_list_s **leaf, char *buf, size_t buf_spc, const char **s, int *s_len);
 extern int geoip2_free_leaf(struct MMDB_entry_data_list_s *leaf);
-extern int geoip2_release(struct MMDB_lookup_result_s **result);
+extern int geoip2_cache_release(struct MMDB_lookup_result_ll **cache);
 extern int geoip2_closedb(void);
 
 #endif

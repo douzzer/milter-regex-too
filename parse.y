@@ -81,7 +81,7 @@ typedef struct {
 
 %token	ERROR STRING
 %token	ACCEPT WHITELIST REJECT TEMPFAIL DISCARD QUARANTINE
-%token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER MACRO BODY PHASEDONE
+%token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER HEADERGEO MACRO BODY PHASEDONE
 %token	AND OR NOT
 %type	<v.string>	STRING
 %type	<v.expr>	expr term
@@ -244,6 +244,13 @@ term	: CONNECT STRING STRING	{
 		free($2);
 		free($3);
 	}
+	| HEADERGEO STRING STRING STRING STRING	{
+	  $$ = create_cond_4(rs, COND_HEADERGEO, $2, $3, $4, $5);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+	}
 	| MACRO STRING STRING	{
 		$$ = create_cond(rs, COND_MACRO, $2, $3);
 		if ($$ == NULL)
@@ -319,6 +326,7 @@ static const struct keywords keywords[] = {
 	{ "envfrom",	ENVFROM,	K_TYPE_COND,	COND_ENVFROM },
 	{ "envrcpt",	ENVRCPT,	K_TYPE_COND,	COND_ENVRCPT },
 	{ "header",	HEADER,		K_TYPE_COND,	COND_HEADER },
+	{ "headergeo",	HEADERGEO,	K_TYPE_COND,	COND_HEADERGEO },
 	{ "helo",	HELO,		K_TYPE_COND,	COND_HELO },
 	{ "macro",	MACRO,		K_TYPE_COND,	COND_MACRO },
 	{ "not",	NOT,		K_TYPE_EXPR,	EXPR_NOT },

@@ -37,7 +37,7 @@
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
 typedef enum { COND_NONE=0, COND_MACRO, COND_CONNECT, COND_CONNECTGEO, COND_HELO, COND_ENVFROM, COND_ENVRCPT,
-    COND_HEADER, COND_BODY, COND_PHASEDONE, COND_MAX } cond_t;
+    COND_HEADER, COND_HEADERGEO, COND_BODY, COND_PHASEDONE, COND_MAX } cond_t;
 enum { EXPR_AND, EXPR_OR, EXPR_NOT, EXPR_COND };
 typedef enum { ACTION_NONE=0, ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
     ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST } action_t;
@@ -50,6 +50,7 @@ struct cond {
 		char	*src;
 		int	 empty;
 		int	 not;
+		int	 global;
 #ifdef GEOIP2
 		union {
 			regex_t	 re;
@@ -61,7 +62,7 @@ struct cond {
 #else
 		regex_t	 re;
 #endif
-	}			 args[2];
+	}			 args[4];
 	struct expr_list	*expr;
 	unsigned		 idx;
 };
@@ -113,6 +114,7 @@ extern const char *lookup_cond_name(int cond_type);
 struct ruleset	*create_ruleset(void);
 struct expr	*create_cond(struct ruleset *, int, const char *,
 		    const char *);
+extern struct expr *create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d);
 struct expr	*create_expr(struct ruleset *, int, struct expr *,
 		    struct expr *);
 struct action	*create_action(struct ruleset *, int, const char *, int lineno);

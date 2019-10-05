@@ -205,6 +205,134 @@ error:
 }
 
 struct expr *
+create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d)
+{
+	struct cond *cond = NULL;
+	struct cond_list *cl = NULL;
+	struct expr *expr = NULL;
+	struct expr_list *elc = NULL;
+
+	eval_mutex_lock();
+	expr = calloc(1, sizeof(struct expr));
+	if (expr == NULL)
+		goto error;
+	elc = calloc(1, sizeof(struct expr_list));
+	if (elc == NULL)
+		goto error;
+
+	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
+		if ((cl->cond->args[0].src == NULL) != (a == NULL) ||
+		    (cl->cond->args[1].src == NULL) != (b == NULL) ||
+		    (cl->cond->args[2].src == NULL) != (c == NULL) ||
+		    (cl->cond->args[3].src == NULL) != (d == NULL) ||
+		    (a != NULL && strcmp(a, cl->cond->args[0].src)) ||
+		    (b != NULL && strcmp(b, cl->cond->args[1].src)) ||
+		    (c != NULL && strcmp(c, cl->cond->args[2].src)) ||
+		    (d != NULL && strcmp(d, cl->cond->args[3].src)))
+			continue;
+		break;
+	}
+	if (cl != NULL)
+		cond = cl->cond;
+	else {
+		cl = calloc(1, sizeof(struct cond_list));
+		if (cl == NULL)
+			goto error;
+		cond = calloc(1, sizeof(struct cond));
+		if (cond == NULL)
+			goto error;
+
+		cond->type = type;
+
+		if (a != NULL) {
+			cond->args[0].src = strdup(a);
+			if (cond->args[0].src == NULL)
+				goto error;
+#ifdef GEOIP2
+			if (type == COND_CONNECTGEO) {
+				if (build_geoip2_path(&cond->args[0]))
+					goto error;
+			} else {
+#endif
+				if (build_regex(&cond->args[0]))
+					goto error;
+#ifdef GEOIP2
+			}
+#endif
+		}
+		if (b != NULL) {
+			cond->args[1].src = strdup(b);
+			if (cond->args[1].src == NULL)
+				goto error;
+			if (build_regex(&cond->args[1]))
+				goto error;
+#ifdef GEOIP2
+			if ((type == COND_HEADERGEO) && (cond->args[1].not || cond->args[1].empty)) {
+				yyerror("create_cond_4: headergeo 2nd arg must not be empty or negated");
+				goto error;
+			}
+#endif
+		}
+		if (c != NULL) {
+			cond->args[2].src = strdup(c);
+			if (cond->args[2].src == NULL)
+				goto error;
+#ifdef GEOIP2
+			if (type == COND_HEADERGEO) {
+				if (build_geoip2_path(&cond->args[2]))
+					goto error;
+			} else {
+#endif
+				if (build_regex(&cond->args[2]))
+					goto error;
+#ifdef GEOIP2
+			}
+#endif
+		}
+		if (d != NULL) {
+			cond->args[3].src = strdup(d);
+			if (cond->args[3].src == NULL)
+				goto error;
+			if (build_regex(&cond->args[3]))
+				goto error;
+		}
+
+		cond->idx = rs->maxidx++;
+		cl->cond = cond;
+		cl->next = rs->cond[type];
+		rs->cond[type] = cl;
+	}
+
+	expr->type = EXPR_COND;
+	expr->cond = cond;
+	expr->idx = rs->maxidx++;
+	elc->expr = expr;
+	elc->next = cond->expr;
+	cond->expr = elc;
+	eval_mutex_unlock();
+	return (expr);
+
+error:
+	if (elc != NULL)
+		free(elc);
+	if (expr != NULL)
+		free(expr);
+	if (cl != NULL)
+		free(cl);
+	if (cond != NULL) {
+		for (int i=0; i<4; ++i) {
+			if (!cond->args[i].empty)
+				regfree(&cond->args[i].re);
+			if (cond->args[i].src != NULL)
+				free(cond->args[i].src);
+		}
+		free(cond);
+	}
+	eval_mutex_unlock();
+	return (NULL);
+}
+
+struct expr *
 create_expr(struct ruleset *rs, int type, struct expr *a, struct expr *b)
 {
 	struct expr *e = NULL;
@@ -407,15 +535,16 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 {
 	++context->check_cond_count;
 #ifdef GEOIP2
-	/* if this is a GeoIP rule, the first arg is the path, not a regexp, and the second arg is always null, to be replaced with the GeoIP leaf. */
-
 	if (c->type == COND_CONNECTGEO) {
+
 		if ((! c->args[0].geoip2_path[0]) || (! geoip2_db_path))
 			return 0; /* GeoIP2 not configured or not working -- fail open. */
 		if (context->geoip2_lookup_ret < 0)
 			return c->args[1].not ? 0 : 1; /* IP lookup failed -- fail closed. */
 		if (! context->geoip2_result) {
-			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0) {
+			context->geoip2_result = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result_cache);
+			if (! context->geoip2_result) {
+				context->geoip2_lookup_ret = -1;
 				return c->args[1].not ? 0 : 1;
 			}
 		}
@@ -458,7 +587,114 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			return matched;
 		} else
 			return c->args[1].not ? 0 : 1; /* leaf lookup failed -- fail closed. */
+
+	} else if (c->type == COND_HEADERGEO) {
+
+/* headergeo /header-name-pattern/ /address-match-pattern/ /geo/record/path /geo-record-pattern/ */
+
+		if ((! c->args[2].geoip2_path[0]) || (! geoip2_db_path))
+			return 0; /* GeoIP2 not configured or not working -- fail open. */
+
+		if (! b)
+			return -1;
+		if (c->args[0].empty) {
+			if (a) {
+				if (c->args[0].not)
+					return 1;
+			} else {
+				if (! c->args[0].not)
+					return 1;
+			}
+		} else {
+			if (a == NULL)
+				return -1;
+		}
+		int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+		if (r && r != REG_NOMATCH)
+			return -1;
+		if ((r == REG_NOMATCH) != c->args[0].not)
+			return 1;
+
+		{
+			ssize_t b_len_left = (ssize_t)strlen(b);
+			const char *b_ptr = b;
+			regmatch_t addr_matches[8];
+			char abuf[64];
+
+			while (b_len_left > 0) {
+				r = regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0);
+				if (r) {
+					if (r != REG_NOMATCH)
+						return -1;
+					else
+						return 1;
+				}
+
+				for (int i=1; i<8; ++i) {
+					if (addr_matches[i].rm_so == -1)
+						break;
+					size_t match_len = addr_matches[i].rm_eo - addr_matches[i].rm_so;
+					if (match_len >= sizeof abuf)
+						continue;
+					memcpy(abuf, b_ptr + addr_matches[i].rm_so, match_len);
+					abuf[match_len] = 0;
+
+					struct MMDB_lookup_result_s *geo = geoip2_lookup(geoip2_db_path, abuf, &context->geoip2_result_cache);
+
+					if (! geo)
+						continue;
+
+					struct MMDB_entry_data_list_s *leaf;
+					if (geoip2_pick_leaf(geo, (const char * const *)c->args[2].geoip2_path, &leaf) == 0) {
+						int matched = 1; /* initialize to no-match. */
+
+						if ((! c->args[3].src) || c->args[3].empty) { /* just a leaf existence check */
+							matched = c->args[3].not ? 1 : 0;
+							goto out2;
+						}
+
+						for (struct MMDB_entry_data_list_s *leaf_i = leaf;
+						     leaf_i;
+							) {
+							char leafbuf[256];
+							const char *s;
+							int s_len;
+
+							if (geoip2_iterate_leaf(&leaf_i, leafbuf, sizeof leafbuf, &s, &s_len) != 0)
+								break;
+							char *s_nulltermed = malloc((size_t)s_len+1); /* avoiding strndup() for portability. */
+							if (! s_nulltermed)
+								continue;
+							memcpy(s_nulltermed,s,(size_t)s_len);
+							s_nulltermed[s_len] = 0;
+							r = regexec(&c->args[3].re, s_nulltermed, 0, NULL, 0);
+							if (r && r != REG_NOMATCH)
+								matched = -1;
+							else if ((r == REG_NOMATCH) == c->args[1].not)
+								matched = 0;
+							free(s_nulltermed);
+							if (matched <= 0)
+								break;
+						}
+					out2:
+						if (geoip2_free_leaf(leaf) < 0)
+							perror("geoip2_free_leaf");
+						if (! matched)
+							return matched;
+					}
+				}
+
+				if (! c->args[1].global)
+					break;
+
+				b_len_left -= addr_matches[0].rm_eo;
+				b_ptr += addr_matches[0].rm_eo;
+			}
+		}
+
+		return c->args[3].not ? 0 : 1;
 	}
+
 #endif
 
 	if (c->type == COND_PHASEDONE) {
@@ -673,6 +909,9 @@ build_regex(struct cond_arg *a)
 				break;
 			case 'n':
 				a->not = 1;
+				break;
+			case 'g':
+				a->global = 1;
 				break;
 			default:
 				yyerror("invalid flag %c in %s", *s, a->src);

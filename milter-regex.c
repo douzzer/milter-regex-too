@@ -182,8 +182,11 @@ prime_geoip2(struct context *context)
 {
 	if (geoip2_db_path) {
 		if ((! context->geoip2_result) && (! context->geoip2_lookup_ret)) {
-			if ((context->geoip2_lookup_ret = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result)) < 0)
+			context->geoip2_result = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result_cache);
+			if (! context->geoip2_result) {
+				context->geoip2_lookup_ret = -1;
 				return -1;
+			}
 		} else if (context->geoip2_lookup_ret < 0) {
 			errno = EINVAL;
 			return -1;
@@ -997,6 +1000,16 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 		return (setreply(ctx, context, COND_HEADER, action));
 	}
 
+#ifdef GEOIP2
+	if ((action = eval_cond(context, COND_HEADERGEO,
+				name, value)) != NULL)
+		return setreply(ctx, context, COND_HEADERGEO, action);
+	if ((action = eval_end(context, COND_CONNECTGEO,
+			       COND_MACRO)) != NULL)
+		return setreply(ctx, context, COND_CONNECTGEO, action);
+#endif
+
+
 #ifdef USE_GMIME
 	if (decoded)
 	  free(decoded);
@@ -1039,6 +1052,13 @@ cb_eoh(SMFICTX *ctx)
 		strlcpy(context->end_eval_note, "EOH", sizeof context->end_eval_note);
 		return (setreply(ctx, context, COND_HEADER, action));
 	}
+
+#ifdef GEOIP2
+	if ((action = eval_end(context, COND_HEADERGEO, COND_BODY)) != NULL) {
+		strlcpy(context->end_eval_note, "EOH-Geo", sizeof context->end_eval_note);
+		return setreply(ctx, context, COND_HEADERGEO, action);
+	}
+#endif
 
 	return (SMFIS_CONTINUE);
 }
@@ -1197,9 +1217,9 @@ cb_close(SMFICTX *ctx)
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
 #ifdef GEOIP2
-		if (context->geoip2_result) {
-			if (geoip2_release(&context->geoip2_result) < 0)
-				msg(LOG_CRIT,context,"geoip2_release(): %s",strerror(errno));
+		if (context->geoip2_result_cache) {
+			if (geoip2_cache_release(&context->geoip2_result_cache) < 0)
+				msg(LOG_CRIT,context,"geoip2_cache_release(): %s",strerror(errno));
 		}
 		if (context->geoip2_result_summary)
 			free(context->geoip2_result_summary);
@@ -1330,7 +1350,6 @@ main(int argc, char **argv)
 			break;
 		case 'd':
 			debug = 1;
-			pid_file = 0;
 			break;
 		case 'j':
 			jail = optarg;
@@ -1366,7 +1385,7 @@ main(int argc, char **argv)
 		usage(argv[0]);
 	}
 
-	if (pid_file) {
+	if (pid_file && (! exit_after_load_flag)) {
 	  FILE *f = fopen(pid_file,"r");
 	  if (f) {
 	    pid_t pid;
@@ -1414,15 +1433,18 @@ main(int argc, char **argv)
 		}
 		if (setgroups(1, &pw->pw_gid)) {
 			perror("setgroups");
-			return (1);
+			if (! exit_after_load_flag)
+				return (1);
 		}
 		if (setgid(pw->pw_gid)) {
 			perror("setgid");
-			return (1);
+			if (! exit_after_load_flag)
+				return (1);
 		}
 		if (setuid(pw->pw_uid)) {
 			perror("setuid");
-			return (1);
+			if (! exit_after_load_flag)
+				return (1);
 		}
 	}
 
@@ -1441,6 +1463,15 @@ main(int argc, char **argv)
 	if (exit_after_load_flag) {
 		fprintf(stderr,"Exiting after successful initialization.\n");
 		exit(0);
+	}
+
+	FILE *pid_stream = 0;
+	if (pid_file) {
+		pid_stream = fopen(pid_file,"wx");
+		if (! pid_stream) {
+			fprintf(stderr,"%s: %s\n",pid_file,strerror(errno));
+			exit(1);
+		}
 	}
 
 	if (smfi_setconn((char *)oconn) != MI_SUCCESS) {
@@ -1464,18 +1495,13 @@ main(int argc, char **argv)
 		goto done;
 	}
 
-	if (pid_file) {
-	  FILE *f = fopen(pid_file,"w");
-	  if (f) {
-	    if (fprintf(f,"%d\n",getpid()) < 0) {
-	      fprintf(stderr,"%s: %s\n",pid_file,strerror(errno));
-	      pid_file = 0;
-	    }
-	    fclose(f);
-	  } else {
-	    fprintf(stderr,"%s: %s\n",pid_file,strerror(errno));
-	    pid_file = 0;
-	  }
+	if (pid_stream) {
+		if (fprintf(pid_stream,"%d\n",getpid()) < 0) {
+			msg(LOG_ERR,NULL,"%s: %s",pid_file,strerror(errno));
+			pid_file = 0;
+		}
+		(void)fclose(pid_stream);
+		pid_stream = 0;
 	}
 
 	umask(0177);
