@@ -294,6 +294,25 @@ static int geoip2_build_summary(struct context *context) {
 	return 0;
 }
 
+static void geoip2_free_summary(struct context *context) {
+	if (context->geoip2_result_summary) {
+		free(context->geoip2_result_summary);
+		context->geoip2_result_summary = 0;
+		context->geoip2_result_summary_cache_head = 0;
+	}
+}
+
+static int geoip2_refresh_summary(struct context *context) {
+	if (! context->geoip2_result_cache)
+		return 0;
+	if (context->geoip2_result_summary_cache_head != context->geoip2_result_cache)
+		geoip2_free_summary(context);
+	if (! context->geoip2_result_summary)
+		return geoip2_build_summary(context);
+	else
+		return 0;
+}
+
 #endif /* GEOIP2 */
 
 static void
@@ -345,8 +364,7 @@ setreply_lognotice(struct context *context) {
 #ifdef GEOIP2
 	if ((! context->action) || (context->action->type != ACTION_WHITELIST))
 		prime_geoip2(context);
-	if (context->geoip2_result && (! context->geoip2_result_summary))
-		(void)geoip2_build_summary(context);
+	geoip2_refresh_summary(context);
 	const char *geoip2_result_summary;
 	if (context->geoip2_result_summary) {
 		geoip2_result_summary = strchr(context->geoip2_result_summary,' ');
@@ -848,11 +866,7 @@ cb_envfrom(SMFICTX *ctx, char **args)
 
 #ifdef GEOIP2
 	/* force reformatting of the summary with the queue ID */
-	if (context->geoip2_result_summary) {
-		free(context->geoip2_result_summary);
-		context->geoip2_result_summary = 0;
-	}
-
+	geoip2_free_summary(context);
 #endif
 
 	if (*args != NULL)
@@ -1151,12 +1165,7 @@ cb_eom(SMFICTX *ctx)
 	}
 
 #ifdef GEOIP2
-	if (context->geoip2_result_summary_cache_head != context->geoip2_result_cache) {
-		free(context->geoip2_result_summary);
-		context->geoip2_result_summary = 0;
-	}
-	if (context->geoip2_result_cache && (! context->geoip2_result_summary))
-		(void)geoip2_build_summary(context);
+	geoip2_refresh_summary(context);
 	const char *geoip2_result_summary;
 	if (context->geoip2_result_summary) {
 		if (((result == SMFIS_ACCEPT) || (result == SMFIS_CONTINUE)) &&
@@ -1237,8 +1246,7 @@ cb_close(SMFICTX *ctx)
 			if (geoip2_cache_release(&context->geoip2_result_cache) < 0)
 				msg(LOG_CRIT,context,"geoip2_cache_release(): %s",strerror(errno));
 		}
-		if (context->geoip2_result_summary)
-			free(context->geoip2_result_summary);
+		geoip2_free_summary(context);
 #endif
 		release_ruleset(context->rs);
 		free(context);
