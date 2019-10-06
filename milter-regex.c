@@ -218,9 +218,9 @@ static int __attribute__((format(printf,3,4))) snprintf_incremental(char **out, 
 	return n;
 }
 
-static int copy_geoip2_leaf(struct context *context, const char * const *nodepath, char **out, size_t *out_spc) {
+static int copy_geoip2_leaf(struct MMDB_lookup_result_s *result, const char * const *nodepath, char **out, size_t *out_spc) {
 	struct MMDB_entry_data_list_s *leaf, *leaf_i;
-	if (geoip2_pick_leaf(context->geoip2_result, nodepath, &leaf) == 0) {
+	if (geoip2_pick_leaf(result, nodepath, &leaf) == 0) {
 		int ret = 0;
 		char leafbuf[256];
 		const char *s;
@@ -245,11 +245,11 @@ static int copy_geoip2_leaf(struct context *context, const char * const *nodepat
 }
 
 static int geoip2_build_summary(struct context *context) {
-	if (! context->geoip2_result) {
+	if (! context->geoip2_result_cache) {
 		errno = ENOENT;
 		return -1;
 	}
-	size_t spc = 256;
+	size_t spc = 512;
 	if (! (context->geoip2_result_summary = malloc(spc)))
 		return -1;
 	char *cp = context->geoip2_result_summary;
@@ -258,23 +258,39 @@ static int geoip2_build_summary(struct context *context) {
 	static const char * const countrypath[] = { "country", "iso_code", (char *)0 };
 	static const char * const subdivpath[] = { "subdivisions", "0", "iso_code", (char *)0 };
 	static const char * const citypath[] = { "city", "names", "en", (char *)0 };
+/*
 	static const char * const latipath[] = { "location", "latitude", (char *)0 };
 	static const char * const longipath[] = { "location", "longitude", (char *)0 };
+*/
 
-	if ((snprintf_incremental(&cp,&spc,"%s%s%s %s /", context->message_id, context->message_id[0] ? "@" : "",context->my_name,context->host_addr) < 0) ||
-	    (copy_geoip2_leaf(context, continentpath, &cp, &spc) < 0) ||
-	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
-	    (copy_geoip2_leaf(context, countrypath, &cp, &spc) < 0) ||
-	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
-	    (copy_geoip2_leaf(context, subdivpath, &cp, &spc) < 0) ||
-	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
-	    (copy_geoip2_leaf(context, citypath, &cp, &spc) < 0) ||
-	    (snprintf_incremental(&cp,&spc,"/ ") < 0) ||
-	    (copy_geoip2_leaf(context, latipath, &cp, &spc) < 0) ||
-	    (snprintf_incremental(&cp,&spc,"/") < 0) ||
-	    (copy_geoip2_leaf(context, longipath, &cp, &spc) < 0))
+	if (snprintf_incremental(&cp,&spc,"%s%s%s", context->message_id, context->message_id[0] ? "@" : "",context->my_name) < 0)
 		return -1;
 
+	for (struct MMDB_lookup_result_ll *result = context->geoip2_result_cache;
+	     result;
+	     result = result->next) {
+		if (! result->result.found_entry)
+			continue;
+		if ((snprintf_incremental(&cp,&spc," %s/", result->addr) < 0) ||
+		    (copy_geoip2_leaf(&result->result, continentpath, &cp, &spc) < 0) ||
+		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+		    (copy_geoip2_leaf(&result->result, countrypath, &cp, &spc) < 0) ||
+		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+		    (copy_geoip2_leaf(&result->result, subdivpath, &cp, &spc) < 0) ||
+		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+		    (copy_geoip2_leaf(&result->result, citypath, &cp, &spc) < 0) ||
+		    (snprintf_incremental(&cp,&spc,"/") < 0)
+/*
+		    || (snprintf_incremental(&cp,&spc,"/ ") < 0) ||
+		    (copy_geoip2_leaf(&result->result, latipath, &cp, &spc) < 0) ||
+		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+		    (copy_geoip2_leaf(&result->result, longipath, &cp, &spc) < 0)
+*/
+)
+			return -1;
+	}
+
+	context->geoip2_result_summary_cache_head = context->geoip2_result_cache;
 	return 0;
 }
 
@@ -1133,7 +1149,11 @@ cb_eom(SMFICTX *ctx)
 	}
 
 #ifdef GEOIP2
-	if (context->geoip2_result && (! context->geoip2_result_summary))
+	if (context->geoip2_result_summary_cache_head != context->geoip2_result_cache) {
+		free(context->geoip2_result_summary);
+		context->geoip2_result_summary = 0;
+	}
+	if (context->geoip2_result_cache && (! context->geoip2_result_summary))
 		(void)geoip2_build_summary(context);
 	const char *geoip2_result_summary;
 	if (context->geoip2_result_summary) {

@@ -47,8 +47,9 @@ struct context {
 #ifdef GEOIP2
 	int geoip2_lookup_ret;
 	struct MMDB_lookup_result_s *geoip2_result;
-	char *geoip2_result_summary;
 	struct MMDB_lookup_result_ll *geoip2_result_cache;
+	char *geoip2_result_summary;
+	struct MMDB_lookup_result_ll *geoip2_result_summary_cache_head;
 #endif
 };
 

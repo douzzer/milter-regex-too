@@ -197,6 +197,8 @@ struct MMDB_lookup_result_s *geoip2_lookup(const char *mmdb_path, const char *ip
     if (! cacheent)
 	goto err_out;
 
+    strcpy(cacheent->addr,ip_address);
+
     int my_gai_error, mmdb_error;
 
     cacheent->result = MMDB_lookup_string(&static_mmdb, ip_address, &my_gai_error, &mmdb_error);
