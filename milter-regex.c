@@ -1555,7 +1555,7 @@ main(int argc, char **argv)
 done:
 	if (pid_file) {
 		if (unlink(pid_file) < 0) {
-			msg(LOG_ERR, NULL, "unlink(%s)",pid_file);
+			msg(LOG_ERR, NULL, "unlink(%s): %m",pid_file);
 			if (truncate(pid_file,(off_t)0) < 0)
 				msg(LOG_ERR, NULL, "ftruncate(%s)",pid_file);
 		}
