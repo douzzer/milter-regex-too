@@ -349,8 +349,10 @@ setreply_lognotice(struct context *context) {
 		(void)geoip2_build_summary(context);
 	const char *geoip2_result_summary;
 	if (context->geoip2_result_summary) {
-		geoip2_result_summary = strchr(context->geoip2_result_summary,'/');
-		if (! geoip2_result_summary)
+		geoip2_result_summary = strchr(context->geoip2_result_summary,' ');
+		if (geoip2_result_summary)
+			++geoip2_result_summary;
+		else
 			geoip2_result_summary = context->geoip2_result_summary;
 	} else
 		geoip2_result_summary = "";
