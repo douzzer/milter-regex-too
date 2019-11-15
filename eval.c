@@ -675,7 +675,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 							r = regexec(&c->args[3].re, s_nulltermed, 0, NULL, 0);
 							if (r && r != REG_NOMATCH)
 								matched = -1;
-							else if ((r == REG_NOMATCH) == c->args[1].not)
+							else if ((r == REG_NOMATCH) == c->args[3].not)
 								matched = 0;
 							free(s_nulltermed);
 							if (matched <= 0)
