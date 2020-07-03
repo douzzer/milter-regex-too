@@ -1323,7 +1323,7 @@ msg(int priority, struct context *context, const char *fmt, ...)
 static void
 usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s [-d] [-x] [-c config] [-u user] [-p pipe]"
+	fprintf(stderr, "usage: %s [-d] [-t] [-c config] [-u user] [-p pipe] [-r pidfile] [-j jaildir]"
 #ifdef GEOIP2
 		" [-g <path to GeoIP2 db file>]"
 #endif
@@ -1363,9 +1363,9 @@ main(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv,
 #ifdef GEOIP2
-		"c:dj:p:u:g:xP:"
+		"c:dj:p:u:g:tr:"
 #else
-		"c:dj:p:u:xP:"
+		"c:dj:p:u:tr:"
 #endif
 		)) != -1) {
 		switch (ch) {
@@ -1384,7 +1384,7 @@ main(int argc, char **argv)
 		case 'u':
 			user = optarg;
 			break;
-		case 'x':
+		case 't':
 			debug = 1;
 			exit_after_load_flag = 1;
 			break;
@@ -1393,7 +1393,7 @@ main(int argc, char **argv)
 			geoip2_db_path = optarg;
 			break;
 #endif
-		case 'P':
+		case 'r':
 		  if (*optarg)
 		    pid_file = optarg;
 		  else
