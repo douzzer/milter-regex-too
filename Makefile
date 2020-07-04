@@ -3,7 +3,7 @@ SHELL=/bin/bash
 
 LIBS=  -lmaxminddb -lmilter -lpthread
 
-all: milter-regex milter-regex.cat8
+all: milter-regex-too milter-regex-too.cat8
 
 GITVERSION=$(shell git describe --always --dirty; git log -1 --date=iso --format='%cd %an <%aE>')
 
@@ -21,7 +21,7 @@ override LDFLAGS+=-L/usr/local/lib $(GMIME_LDFLAGS)
 
 milter-regex-version.o: milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
 
-milter-regex: milter-regex-version.o milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
+milter-regex-too: milter-regex-version.o milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
 	$(CC) $(LDFLAGS) -o $@ $+ $(LIBS)
 
 %.o: %.c
@@ -30,11 +30,11 @@ milter-regex: milter-regex-version.o milter-regex.o eval.o geoip2.o strlcat.o st
 parse.tab.c parse.tab.h: parse.y
 	bison -d parse.y
 
-milter-regex.cat8: milter-regex.8
-	nroff -Tascii -mandoc milter-regex.8 > milter-regex.cat8
+milter-regex-too.cat8: milter-regex-too.8
+	nroff -Tascii -mandoc milter-regex-too.8 > milter-regex-too.cat8
 
 clean:
-	rm -f *.core milter-regex parse.tab.{c,h} *.o *.d *.cat8
+	rm -f *.core milter-regex-too parse.tab.{c,h} *.o *.d *.cat8
 
 #dependencies:
 -include *.d

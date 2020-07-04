@@ -1,5 +1,5 @@
 *.d
 *.o
-milter-regex
+milter-regex-too
 *.cat?
 parse.tab.?
