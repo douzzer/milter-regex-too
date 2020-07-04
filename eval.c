@@ -525,6 +525,8 @@ eval_clear(struct context *context, int type)
 	for (; type < COND_MAX; ++type)
 		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 			push_cond_result(cl->cond, VAL_UNDEF, res);
+	for (struct action_list *al = rs->action; al != NULL; al = al->next)
+		res[al->action->idx] = VAL_UNDEF;
 	eval_mutex_unlock();
 	if (debug)
 		context->eval_time_cum += now_usecs() - start_at;
@@ -759,7 +761,7 @@ push_expr_result(struct expr *e, int val, int *res)
 	if (res[e->idx] == val)
 		return;
 	res[e->idx] = val;
-	if (e->action != NULL)
+	if (e->action != NULL && val == VAL_TRUE)
 		res[e->action->idx] = val;
 	for (el = e->expr; el != NULL; el = el->next) {
 		struct expr *p = el->expr;
