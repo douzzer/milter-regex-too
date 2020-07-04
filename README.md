@@ -4,7 +4,7 @@ This is `milter-regex-too`, forked from Daniel Hartmeier's `milter-regex` at ver
 See [the master page for milter-regex](https://www.benzedrine.ch/milter-regex.html) for more on
 the original `milter-regex`, currently at version 2.7 (December 12th, 2019).
 
-The most significant enhancement in `milter-regex-too` is GeoIP rules based
+The most significant enhancements in `milter-regex-too` are GeoIP rules based
 on [`libmaxminddb` from MaxMind](https://github.com/maxmind/libmaxminddb/).
 
 ## Usage
@@ -12,8 +12,9 @@ on [`libmaxminddb` from MaxMind](https://github.com/maxmind/libmaxminddb/).
 ```
 usage: ./milter-regex-too [-d] [-t] [-c config] [-u user] [-p pipe] [-r pidfile] [-j jaildir] [-g <path to GeoIP2 db file>]
 ```
+
 |Flag   | Meaning
------------------
+--------|---------
 |`-d`     | debug mode -- verbose diagnostics and run in foreground
 |`-t`     | test config and exit
 |`-c config` | use `config` rather than the default `/etc/milter-regex.conf`
@@ -26,15 +27,16 @@ usage: ./milter-regex-too [-d] [-t] [-c config] [-u user] [-p pipe] [-r pidfile]
 This fork does not (yet) include the following features added in
 mainline versions 2.0-2.7:
 
->2.6: April 26th, 2019
->Make pid file writable only by root, from Ralph Seichter.
->2.4: March 2nd, 2019
->Add -f option to set syslog facility. Patch from Takao Abe.
->2.2: September 25, 2018
->Add -U, -G, and -P options to set pipe user, group, and permissions. Suggested and tested by Ralph Seichter.
->2.0: November 25, 2013
->Add -l option to specify maximum log level.
-
+```
+  2.6: April 26th, 2019
+  Make pid file writable only by root, from Ralph Seichter.
+  2.4: March 2nd, 2019
+  Add -f option to set syslog facility. Patch from Takao Abe.
+  2.2: September 25, 2018
+  Add -U, -G, and -P options to set pipe user, group, and permissions. Suggested and tested by Ralph Seichter.
+  2.0: November 25, 2013
+  Add -l option to specify maximum log level.
+```
 
 ### Major config file additions relative to mainline `milter-regex`:
 
