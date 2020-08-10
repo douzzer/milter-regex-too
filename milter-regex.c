@@ -1034,11 +1034,10 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 
 #ifdef GEOIP2
 	if ((action = eval_cond(context, COND_HEADERGEO,
-				name, value)) != NULL)
+				name, value)) != NULL) {
+		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
 		return setreply(ctx, context, COND_HEADERGEO, action);
-	if ((action = eval_end(context, COND_CONNECTGEO,
-			       COND_MACRO)) != NULL)
-		return setreply(ctx, context, COND_CONNECTGEO, action);
+	}
 #endif
 
 	return (SMFIS_CONTINUE);
