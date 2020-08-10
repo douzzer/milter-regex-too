@@ -62,7 +62,7 @@ static __attribute__((unused)) const char rcsid[] = "$Id: milter-regex.c,v 1.9 2
 
 #include "milter-regex.h"
 
-static const char	*rule_file_name = "/etc/milter-regex.conf";
+static const char	*rule_file_name = "/etc/milter-regex-too.conf";
 static const char *pid_file = "/var/run/milter-regex.pid";
 int		 debug = 0;
 static int starting_up = 1;
