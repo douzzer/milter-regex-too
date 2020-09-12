@@ -33,7 +33,11 @@
 #ifndef _EVAL_H_
 #define _EVAL_H_
 
+#ifdef USE_PCRE2
+#include <pcre2posix.h>
+#else
 #include <regex.h>
+#endif
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
 typedef enum { COND_NONE=0, COND_MACRO, COND_CONNECT,
