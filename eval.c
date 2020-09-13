@@ -852,9 +852,14 @@ build_regex(struct cond_arg *a)
 		}
 	} else {
 		char *u;
-		int flags = REG_EXTENDED, r;
+#ifdef USE_PCRE2
+		int flags = 0;
+#else
+		int flags = REG_EXTENDED;
+#endif
+		int r;
 
-#ifdef __BSD_VISIBLE
+#if defined(__BSD_VISIBLE) && !defined(USE_PCRE2)
 		/* kludge until migration to PCRE2 */
 		{
 			int n_wordedges = 0;
@@ -906,8 +911,14 @@ build_regex(struct cond_arg *a)
 		while (*s) {
 			switch (*s) {
 			case 'b':
+#ifdef USE_PCRE2
+				yyerror("regex flag b (basic) used but not allowed when USE_PCRE2, in %s", a->src);
+				free(u);
+				return (1);
+#else
 				flags |= REG_BASIC;
 				flags &= ~REG_EXTENDED;
+#endif
 				break;
 			case 'e':
 				break;
