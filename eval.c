@@ -853,7 +853,7 @@ build_regex(struct cond_arg *a)
 	} else {
 		char *u;
 #ifdef USE_PCRE2
-		int flags = 0;
+		int flags = REG_DOTALL; /* ". matches anything including NL" */
 #else
 		int flags = REG_EXTENDED;
 #endif
