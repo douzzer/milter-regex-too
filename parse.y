@@ -250,6 +250,8 @@ term	: CONNECT STRING STRING	{
 			YYERROR;
 		free($2);
 		free($3);
+		free($4);
+		free($5);
 	}
 	| MACRO STRING STRING	{
 		$$ = create_cond(rs, COND_MACRO, $2, $3);
