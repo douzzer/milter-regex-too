@@ -95,6 +95,7 @@ typedef struct {
 file	: /* empty */
 	| macro file		{ }
 	| rule file		{ }
+	| capture file		{ }
 	;
 
 rule	: action expr_l		{
@@ -115,6 +116,125 @@ macro	: STRING '=' expr	{
 		free($1);
 	}
 	;
+
+capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
+
+		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL);
+		if (cap_expr == NULL)
+			YYERROR;
+
+		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
+		if (meta == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+
+		cap_expr->action = meta;
+
+		free($2);
+		free($3);
+		free($4);
+	}
+	| CAPTURE_ALL_HEADER STRING STRING STRING	{
+		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL);
+		if (cap_expr == NULL)
+			YYERROR;
+
+		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
+		if (meta == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+
+		cap_expr->action = meta;
+
+		free($2);
+		free($3);
+		free($4);
+	}
+	| CAPTURE_ONCE_HEADER_GEO STRING STRING STRING STRING	{
+#ifdef GEOIP2
+		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5);
+		if (cap_expr == NULL)
+			YYERROR;
+
+		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
+		if (meta == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+
+		cap_expr->action = meta;
+
+		free($2);
+		free($3);
+		free($4);
+		free($5);
+#else
+		YYERROR;
+#endif
+	}
+	| CAPTURE_ALL_HEADER_GEO STRING STRING STRING STRING	{
+#ifdef GEOIP2
+		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5);
+		if (cap_expr == NULL)
+			YYERROR;
+
+		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
+		if (meta == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+
+		cap_expr->action = meta;
+
+		free($2);
+		free($3);
+		free($4);
+		free($5);
+#else
+		YYERROR;
+#endif
+	}
+	| CAPTURE_MACRO STRING STRING STRING	{
+		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL);
+		if (cap_expr == NULL)
+			YYERROR;
+
+		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
+		if (meta == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+
+		cap_expr->action = meta;
+
+		free($2);
+		free($3);
+		free($4);
+	}
+	| CAPTURE_MACRO_GEO STRING STRING STRING STRING	{
+#ifdef GEOIP2
+		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, $5);
+		if (cap_expr == NULL)
+			YYERROR;
+
+		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
+		if (meta == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+
+		cap_expr->action = meta;
+
+		free($2);
+		free($3);
+		free($4);
+		free($5);
+#else
+		YYERROR;
+#endif
+	}
 
 action	: REJECT STRING		{
 	$$ = create_action(rs, ACTION_REJECT, $2, yylval.lineno);
@@ -156,13 +276,6 @@ action	: REJECT STRING		{
 	}
 	| WHITELIST 		{
 		$$ = create_action(rs, ACTION_WHITELIST, "", yylval.lineno);
-		if ($$ == NULL) {
-			yyerror("yyparse: create_action");
-			YYERROR;
-		}
-	}
-	| META	{
-		$$ = create_action(rs, ACTION_META, "", yylval.lineno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -215,70 +328,7 @@ expr	: term			{
 	}
 	;
 
-term	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL);
-		if ($$ == NULL)
-			YYERROR;
-		free($2);
-		free($3);
-		free($4);
-	}
-	| CAPTURE_ALL_HEADER STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL);
-		if ($$ == NULL)
-			YYERROR;
-		free($2);
-		free($3);
-		free($4);
-	}
-	| CAPTURE_ONCE_HEADER_GEO STRING STRING STRING STRING	{
-#ifdef GEOIP2
-		$$ = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5);
-		if ($$ == NULL)
-			YYERROR;
-		free($2);
-		free($3);
-		free($4);
-		free($5);
-#else
-		YYERROR;
-#endif
-	}
-	| CAPTURE_ALL_HEADER_GEO STRING STRING STRING STRING	{
-#ifdef GEOIP2
-		$$ = create_cond_4(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5);
-		if ($$ == NULL)
-			YYERROR;
-		free($2);
-		free($3);
-		free($4);
-		free($5);
-#else
-		YYERROR;
-#endif
-	}
-	| CAPTURE_MACRO STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL);
-		if ($$ == NULL)
-			YYERROR;
-		free($2);
-		free($3);
-		free($4);
-	}
-	| CAPTURE_MACRO_GEO STRING STRING STRING STRING	{
-#ifdef GEOIP2
-		$$ = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, $5);
-		if ($$ == NULL)
-			YYERROR;
-		free($2);
-		free($3);
-		free($4);
-		free($5);
-#else
-		YYERROR;
-#endif
-	}
-	| COMPARE_CAPTURES STRING STRING STRING STRING	{
+term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 		$$ = create_cond_4(rs, COND_COMPARE_CAPTURES, $2, $3, $4, $5);
 		if ($$ == NULL)
 			YYERROR;
