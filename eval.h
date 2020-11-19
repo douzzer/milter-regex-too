@@ -40,18 +40,28 @@
 #endif
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
-typedef enum { COND_NONE=0, COND_MACRO, COND_CONNECT,
+typedef enum { COND_NONE=0, COND_CAPTURE_MACRO,
+#ifdef GEOIP2
+	       COND_CAPTURE_MACRO_GEO,
+#endif
+	       COND_MACRO, COND_CONNECT,
 #ifdef GEOIP2
 	       COND_CONNECTGEO,
 #endif
-	       COND_HELO, COND_ENVFROM, COND_ENVRCPT, COND_HEADER,
+	       COND_HELO, COND_ENVFROM, COND_ENVRCPT,
+	       COND_CAPTURE_ONCE_HEADER, COND_CAPTURE_ALL_HEADER,
+#ifdef GEOIP2
+	       COND_CAPTURE_ONCE_HEADER_GEO, COND_CAPTURE_ALL_HEADER_GEO,
+#endif
+	       COND_COMPARE_HEADER, COND_COMPARE_CAPTURES,
+	       COND_HEADER,
 #ifdef GEOIP2
 	       COND_HEADERGEO,
 #endif
 	       COND_BODY, COND_PHASEDONE, COND_MAX } cond_t;
 enum { EXPR_AND, EXPR_OR, EXPR_NOT, EXPR_COND };
 typedef enum { ACTION_NONE=0, ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
-    ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST } action_t;
+	ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST, ACTION_META } action_t;
 
 struct expr;
 
@@ -59,9 +69,15 @@ struct cond {
 	cond_t type; /* COND_MACRO...COND_MAX */
 	struct cond_arg {
 		char	*src;
-		int	 empty;
-		int	 not;
-		int	 global;
+		unsigned int	 empty:1;
+		unsigned int	 not:1;
+		unsigned int	 global:1;
+
+		unsigned int	 compare_as_prefix:1;
+		unsigned int	 compare_as_dname_prefix:1;
+		unsigned int	 compare_as_suffix:1;
+		unsigned int	 compare_as_dname_suffix:1;
+
 #ifdef GEOIP2
 		union {
 			regex_t	 re;
@@ -135,5 +151,17 @@ struct action	*eval_cond(struct context *context, int,
 struct action	*eval_end(struct context *context, int, int);
 void		 eval_clear(struct context *context, int);
 void		 free_ruleset(struct ruleset *);
+
+struct kv_binding {
+	struct kv_binding *prev, *next;
+	const char *key;
+	size_t val_len;
+	char val[];
+};
+
+extern int insert_kv_binding(struct context *context, const char *key, const char *val, size_t val_len, struct kv_binding **point);
+extern const char *get_kv_binding_next(const struct kv_binding **next);
+const char *get_kv_binding_first(struct context *context, const char *key, const struct kv_binding **next);
+void free_kv_bindings(struct kv_binding *list);
 
 #endif

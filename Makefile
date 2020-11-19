@@ -1,7 +1,7 @@
 # $Id: Makefile.linux,v 1.3 2011/07/16 13:51:34 dhartmei Exp $
 SHELL=/bin/bash
 
-LIBS=  -lmaxminddb -lmilter -lpthread
+LIBS = -lmilter -lpthread
 
 all: milter-regex-too milter-regex-too.cat8
 
@@ -23,13 +23,31 @@ else
 	PCRE2_LDFLAGS=$(shell PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --libs libpcre2-posix)
 endif
 
-override CFLAGS+=-std=gnu99 -O2 -g -MMD -DGITVERSION='"$(GITVERSION)"' -DGEOIP2 -DYYERROR_VERBOSE=1 -I/usr/local/include $(GMIME_CFLAGS) $(PCRE2_CFLAGS) -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
+ifdef NO_GEOIP
+	GEOIP_CFLAGS=
+	GEOIP_LDFLAGS=
+	GEOIP_OBJS=
+else
+	GEOIP_CFLAGS=-DGEOIP2
+	GEOIP_LDFLAGS=-lmaxminddb
+	GEOIP_OBJS=geoip2.o
+endif
 
-override LDFLAGS+=-L/usr/local/lib $(GMIME_LDFLAGS) $(PCRE2_LDFLAGS)
+ifdef LIBROKEN
+	BROKEN_CFLAGS=-include /usr/include/roken.h
+	BROKEN_LDFLAGS=-lroken
+else
+	BROKEN_CFLAGS=
+	BROKEN_LDFLAGS=
+endif
 
-milter-regex-version.o: milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
+override CFLAGS+=-std=gnu99 -O3 -march=native -g -MMD -DGITVERSION='"$(GITVERSION)"' $(GEOIP_CFLAGS) -DYYERROR_VERBOSE=1 -I/usr/local/include $(BROKEN_CFLAGS) $(GMIME_CFLAGS) $(PCRE2_CFLAGS) -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
 
-milter-regex-too: milter-regex-version.o milter-regex.o eval.o geoip2.o strlcat.o strlcpy.o parse.tab.o
+override LDFLAGS+=-L/usr/local/lib $(BROKEN_LDFLAGS) $(GMIME_LDFLAGS) $(PCRE2_LDFLAGS) $(GEOIP_LDFLAGS)
+
+milter-regex-version.o: milter-regex.o eval.o $(GEOIP_OBJS) strlcat.o strlcpy.o parse.tab.o
+
+milter-regex-too: milter-regex-version.o milter-regex.o eval.o $(GEOIP_OBJS) strlcat.o strlcpy.o parse.tab.o
 	$(CC) $(LDFLAGS) -o $@ $+ $(LIBS)
 
 %.o: %.c

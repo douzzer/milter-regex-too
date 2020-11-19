@@ -19,7 +19,7 @@ struct context {
 	unsigned long	 smfi_phases;
 	long long int	 eval_time_cum;
 	int		 check_cond_count;
-	enum { MESSAGE_INPROGRESS=0, MESSAGE_ABORTED, MESSAGE_COMPLETED } message_status;
+	enum { MESSAGE_INPROGRESS=0, MESSAGE_ABORTED, MESSAGE_COMPLETED, MESSAGE_LOGGED } message_status;
 	struct ruleset	*rs;
 	int		*res;
 	char		 buf[2048];	/* longer body lines are wrapped */
@@ -37,6 +37,8 @@ struct context {
 	char		 hdr_from[128];
 	char		 hdr_to[128];
 	char		 hdr_subject[128];
+	struct kv_binding *captures;
+	int		 captures_change_count;
 	char		 end_eval_note[128];
 	size_t		 body_start_offset;
 	size_t		 body_end_offset;
@@ -77,6 +79,8 @@ extern int geoip2_iterate_leaf(struct MMDB_entry_data_list_s **leaf, char *buf, 
 extern int geoip2_free_leaf(struct MMDB_entry_data_list_s *leaf);
 extern int geoip2_cache_release(struct MMDB_lookup_result_ll **cache);
 extern int geoip2_closedb(void);
+extern int prime_geoip2(struct context *context);
+extern int geoip2_refresh_summary(struct context *context);
 
 #endif
 

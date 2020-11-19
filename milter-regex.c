@@ -177,11 +177,11 @@ daemon(int nochdir, int noclose)
 
 #ifdef GEOIP2
 
-static int
+int
 prime_geoip2(struct context *context)
 {
 	if (geoip2_db_path) {
-		if ((! context->geoip2_result) && (! context->geoip2_lookup_ret)) {
+		if ((! context->geoip2_result) && (! context->geoip2_lookup_ret) && (context->host_addr[0])) {
 			context->geoip2_result = geoip2_lookup(geoip2_db_path, context->host_addr, &context->geoip2_result_cache, 0);
 			if (! context->geoip2_result) {
 				context->geoip2_lookup_ret = -1;
@@ -302,7 +302,7 @@ static void geoip2_free_summary(struct context *context) {
 	}
 }
 
-static int geoip2_refresh_summary(struct context *context) {
+int geoip2_refresh_summary(struct context *context) {
 	if (! context->geoip2_result_cache)
 		return 0;
 	if (context->geoip2_result_summary_cache_head != context->geoip2_result_cache)
@@ -339,6 +339,8 @@ setreply_lognotice(struct context *context) {
 		case MESSAGE_COMPLETED:
 			action_name = "FALLTHROUGH";
 			break;
+		case MESSAGE_LOGGED:
+			return;
 		}
 	} else {
 		action_name = lookup_action_name(context->action->type);
@@ -352,6 +354,8 @@ setreply_lognotice(struct context *context) {
 		case MESSAGE_COMPLETED:
 			action_name_upcased[0] = 0;
 			break;
+		case MESSAGE_LOGGED:
+			return;
 		}
 		for (char *cp = action_name_upcased + strlen(action_name_upcased);; ++cp, ++action_name) {
 			*cp = toupper(*action_name);
@@ -443,12 +447,17 @@ setreply_lognotice(struct context *context) {
 		    , geoip2_result_summary
 #endif
 		    );
+
+	context->message_status = MESSAGE_LOGGED;
 }
 
 static sfsistat
 setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *action)
 {
 	sfsistat result = SMFIS_CONTINUE;
+
+	if (action->type == ACTION_META)
+		return SMFIS_CONTINUE;
 
 	context->action = action;
 	context->last_phase_done = phase;
@@ -467,6 +476,7 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 		break;
 	case ACTION_QUARANTINE:
 		/* result stays SMFIS_CONTINUE */
+	case ACTION_META: /* to shush -Wswitch */
 		break;
 	case ACTION_DISCARD:
 		result = SMFIS_DISCARD;
@@ -489,7 +499,11 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 
 	context->action_result = result;
 
-	if ((phase == COND_CONNECT) || (phase == COND_CONNECTGEO) || (phase == COND_BODY)) {
+	if ((phase == COND_CONNECT) || (phase == COND_BODY)
+#ifdef GEOIP2
+	    || (phase == COND_CONNECTGEO)
+#endif
+	    ) {
 		if ((result == SMFIS_ACCEPT) || (result == SMFIS_DISCARD)) {
 			if ((phase == COND_BODY) && (context->smfi_phases & SMFIP_SKIP))
 				return SMFIS_SKIP;
@@ -500,6 +514,26 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 	} else
 		return SMFIS_CONTINUE;
 }
+
+#ifdef EXPERIMENTING_WITH_CONTINUATION
+#define SETREPLY_RETURN_IF_DONE(smi_ctx, mr_ctx, eval_phase, action, before_returning...) ({ \
+			sfsistat _ret = setreply(ctx, context, COND_CONNECT, action); \
+			if ((_ret != SMFIS_CONTINUE) || \
+			    (mr_ctx->action_result != SMFIS_CONTINUE)) { \
+				before_returning; \
+				return _ret; \
+			} \
+			})
+
+#else
+
+#define SETREPLY_RETURN_IF_DONE(smi_ctx, mr_ctx, eval_phase, action, before_returning...) ({ \
+			before_returning;				\
+			return setreply(ctx, context, COND_CONNECT, action); \
+			})
+
+#endif
+
 
 #if __linux__ || __sun__
 #define	ST_MTIME_SEC st_mtime
@@ -628,7 +662,7 @@ get_ruleset(void)
 static void release_ruleset(struct ruleset *rs) {
 	ruleset_mutex_lock();
 	if (--rs->refcnt < 0)
-		msg(LOG_ERR, 0, "rulset refcount is %d!\n",rs->refcnt);
+		msg(LOG_ERR, 0, "ruleset refcount is %d!\n",rs->refcnt);
 	ruleset_mutex_unlock();
 }
 
@@ -648,6 +682,9 @@ check_macros(SMFICTX *ctx, struct context *context, cond_t phase)
 		if ((action = eval_cond(context, COND_MACRO,
 		    macro[i].name, v)) != NULL)
 			return (action);
+
+		if ((action = eval_cond(context, COND_CAPTURE_MACRO, macro[i].name, v)))
+			return action;
 	}
 
 	return (NULL);
@@ -666,7 +703,7 @@ cb_negotiate(SMFICTX *ctx,
 	struct context *context;
 	context = calloc(1, sizeof(*context));
 	if (context == NULL) {
-		msg(LOG_ERR, NULL, "cb_connect: calloc: %s", strerror(errno));
+		msg(LOG_ERR, NULL, "cb_negotiate: calloc: %s", strerror(errno));
 		return SMFIS_REJECT; /* "milter startup fails and it will not be contacted again (for the current connection)." */
 	}
 	if (debug) {
@@ -767,29 +804,34 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 
 	msg(LOG_DEBUG, context, "cb_connect('%s', '%s')",
 	    context->host_name, context->host_addr);
-	if ((action = check_macros(ctx, context, COND_CONNECT)) != NULL) {
-		strlcpy(context->end_eval_note, "CONNECT-M", sizeof context->end_eval_note);
-		return setreply(ctx, context, COND_CONNECT, action);
-	}
+
+	if ((action = check_macros(ctx, context, COND_CONNECT)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action,
+					strlcpy(context->end_eval_note, "CONNECT-M", sizeof context->end_eval_note));
 	eval_clear(context, COND_CONNECT);
 	if ((action = eval_cond(context, COND_CONNECT,
 				context->host_name, context->host_addr)) != NULL)
-		return setreply(ctx, context, COND_CONNECT, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
 
 	if ((action = eval_end(context, COND_CONNECT,
 	    COND_MACRO)) !=
 	    NULL)
-		return setreply(ctx, context, COND_CONNECT, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
 
 #ifdef GEOIP2
 	eval_clear(context, COND_CONNECTGEO);
 	if ((action = eval_cond(context, COND_CONNECTGEO,
 				context->host_addr, NULL)) != NULL)
-		return setreply(ctx, context, COND_CONNECTGEO, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECTGEO, action);
 	if ((action = eval_end(context, COND_CONNECTGEO,
 			       COND_MACRO)) != NULL)
-		return setreply(ctx, context, COND_CONNECTGEO, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECTGEO, action);
 #endif
+
+	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
+				NULL, NULL)) !=
+	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
 
 	context->action_result = SMFIS_CONTINUE;
 
@@ -822,23 +864,28 @@ cb_helo(SMFICTX *ctx, char *arg)
 
 	strlcpy(context->helo, arg, sizeof(context->helo));
 
+	msg(LOG_DEBUG, context, "cb_helo('%s')", arg);
+
 	if (context->action)
 		return SMFIS_CONTINUE;
 
-	msg(LOG_DEBUG, context, "cb_helo('%s')", arg);
 	/* multiple HELO imply RSET in sendmail */
 
-	if ((action = check_macros(ctx, context, COND_HELO)) != NULL) {
-		strlcpy(context->end_eval_note, "HELO-M", sizeof context->end_eval_note);
-		return (setreply(ctx, context, COND_HELO, action));
-	}
+	if ((action = check_macros(ctx, context, COND_HELO)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action,
+					strlcpy(context->end_eval_note, "HELO-M", sizeof context->end_eval_note));
 	eval_clear(context, COND_HELO);
 	if ((action = eval_cond(context, COND_HELO,
 	    arg, NULL)) != NULL)
-		return (setreply(ctx, context, COND_HELO, action));
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
 	if ((action = eval_end(context, COND_HELO,
 	    COND_MACRO)) != NULL)
-		return (setreply(ctx, context, COND_HELO, action));
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
+
+	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
+				NULL, NULL)) !=
+	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
 
 	return (SMFIS_CONTINUE);
 }
@@ -878,30 +925,40 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	 */
 	if (context->action &&
 	    (context->last_phase_done != COND_CONNECT) &&
+#ifdef GEOIP2
 	    (context->last_phase_done != COND_CONNECTGEO) &&
+#endif
 	    (context->last_phase_done != COND_HELO)) {
 		msg(LOG_DEBUG, context, "cleared cached action for repeat cb_envfrom()");
 		context->action = 0;
 	}
 
+	if (debug && *args)
+		msg(LOG_DEBUG, context, "cb_envfrom('%s')", *args);
+
 	if (context->action)
 		return SMFIS_CONTINUE;
 
 	/* multiple MAIL FROM indicate separate messages */
+
 	eval_clear(context, COND_ENVFROM);
 	if (*args != NULL) {
-		msg(LOG_DEBUG, context, "cb_envfrom('%s')", *args);
 		if ((action = eval_cond(context, COND_ENVFROM,
 		    *args, NULL)) != NULL)
-			return (setreply(ctx, context, COND_ENVFROM, action));
+			SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 	}
 	if ((action = eval_end(context, COND_ENVFROM,
 	    COND_MACRO)) != NULL)
-		return (setreply(ctx, context, COND_ENVFROM, action));
-	if ((action = check_macros(ctx, context, COND_ENVFROM)) != NULL) {
-		strlcpy(context->end_eval_note, "ENVFROM-M", sizeof context->end_eval_note);
-		return (setreply(ctx, context, COND_ENVFROM, action));
-	}
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
+
+	if ((action = check_macros(ctx, context, COND_ENVFROM)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action,
+					strlcpy(context->end_eval_note, "ENVFROM-M", sizeof context->end_eval_note));
+
+	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
+				NULL, NULL)) !=
+	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
 
 	return (SMFIS_CONTINUE);
 }
@@ -924,24 +981,33 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 		strlcat(context->env_rcpt, *args, sizeof(context->env_rcpt));
 	}
 
+	if (debug && *args)
+		msg(LOG_DEBUG, context, "cb_envrcpt('%s')", *args);
+
 	if (context->action)
 		return SMFIS_CONTINUE;
 
 	/* multiple RCPT TO: possible */
+
 	eval_clear(context, COND_ENVRCPT);
+
 	if (*args != NULL) {
-		msg(LOG_DEBUG, context, "cb_envrcpt('%s')", *args);
 		if ((action = eval_cond(context, COND_ENVRCPT,
 		    *args, NULL)) != NULL)
-			return (setreply(ctx, context, COND_ENVRCPT, action));
+			SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 	}
 	if ((action = eval_end(context, COND_ENVRCPT,
 	    COND_MACRO)) != NULL)
-		return (setreply(ctx, context, COND_ENVRCPT, action));
-	if ((action = check_macros(ctx, context, COND_ENVRCPT)) != NULL) {
-		strlcpy(context->end_eval_note, "ENVRCPT-M", sizeof context->end_eval_note);
-		return (setreply(ctx, context, COND_ENVRCPT, action));
-	}
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
+
+	if ((action = check_macros(ctx, context, COND_ENVRCPT)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action,
+					strlcpy(context->end_eval_note, "ENVRCPT-M", sizeof context->end_eval_note));
+
+	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
+				NULL, NULL)) !=
+	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
 
 	return (SMFIS_CONTINUE);
 }
@@ -992,20 +1058,21 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	}
 #endif
 
+	int saved_a_header = 0;
 	if (!strcasecmp(name, "From")) {
 		strlcpy(context->hdr_from, value, sizeof(context->hdr_from));
 		zap_ctrls(context->hdr_from);
+		saved_a_header = 1;
 	} else if (!strcasecmp(name, "To")) {
 		strlcpy(context->hdr_to, value, sizeof(context->hdr_to));
 		zap_ctrls(context->hdr_to);
+		saved_a_header = 1;
 	} else if (!strcasecmp(name, "Subject")) {
 		strlcpy(context->hdr_subject, value,
 		    sizeof(context->hdr_subject));
 		zap_ctrls(context->hdr_subject);
+		saved_a_header = 1;
 	}
-
-	if (context->action)
-		return SMFIS_CONTINUE;
 
 	if (debug) {
 #ifdef USE_GMIME
@@ -1017,28 +1084,48 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	    msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
 	}
 
+	if (context->action)
+		return SMFIS_CONTINUE;
+
 #ifdef USE_GMIME
 	/* match first on the raw value, to allow matching on verbatim charsets. */
 	if (rawvalue && (action = eval_cond(context, COND_HEADER,
-	    name, rawvalue)) != NULL) {
-		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
-		return (setreply(ctx, context, COND_HEADER, action));
-	}
+	    name, rawvalue)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
 #endif
 
 	if ((action = eval_cond(context, COND_HEADER,
-	    name, value)) != NULL) {
-		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
-		return (setreply(ctx, context, COND_HEADER, action));
-	}
+	    name, value)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
 
 #ifdef GEOIP2
 	if ((action = eval_cond(context, COND_HEADERGEO,
-				name, value)) != NULL) {
-		snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name);
-		return setreply(ctx, context, COND_HEADERGEO, action);
-	}
+				name, value)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADERGEO, action,
+					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
 #endif
+
+	if ((action = eval_cond(context, COND_CAPTURE_ONCE_HEADER, name, value)))
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ONCE_HEADER, action,
+					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
+
+	if ((action = eval_cond(context, COND_CAPTURE_ALL_HEADER, name, value)))
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ALL_HEADER, action,
+					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
+
+	if ((action = eval_cond(context, COND_COMPARE_HEADER,
+	    name, value)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_HEADER, action,
+					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
+
+	if (saved_a_header) {
+		if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
+					NULL, NULL)) !=
+		    NULL)
+			SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action, strlcpy(context->end_eval_note, "Header-Captures", sizeof context->end_eval_note));
+	}
 
 	return (SMFIS_CONTINUE);
 }
@@ -1054,35 +1141,35 @@ cb_eoh(SMFICTX *ctx)
 		return (SMFIS_ACCEPT);
 	}
 
+	msg(LOG_DEBUG, context, "cb_eoh()");
+
 	if (context->action)
 		return SMFIS_CONTINUE;
 
-	msg(LOG_DEBUG, context, "cb_eoh()");
+	if ((action = check_macros(ctx, context, COND_HEADER)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+					strlcpy(context->end_eval_note, "EOH-M1", sizeof context->end_eval_note));
 
-	if ((action = check_macros(ctx, context, COND_HEADER)) != NULL) {
-		strlcpy(context->end_eval_note, "EOH-M1", sizeof context->end_eval_note);
-		return setreply(ctx, context, COND_HEADER, action);
-	}
+	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
+				NULL, NULL)) !=
+	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action, strlcpy(context->end_eval_note, "EOH-Captures", sizeof context->end_eval_note));
 
-	if ((action = eval_end(context, COND_MACRO,
-	    COND_HEADER)) != NULL) {
-		strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note);
-		return (setreply(ctx, context, COND_HEADER, action));
-	}
+	if ((action = eval_end(context, COND_MACRO, COND_HEADER)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+					strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note));
 
 	memset(context->buf, 0, sizeof(context->buf));
 	context->pos = 0;
 
-	if ((action = eval_end(context, COND_HEADER, COND_BODY)) != NULL) {
-		strlcpy(context->end_eval_note, "EOH", sizeof context->end_eval_note);
-		return (setreply(ctx, context, COND_HEADER, action));
-	}
+	if ((action = eval_end(context, COND_HEADER, COND_BODY)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+					strlcpy(context->end_eval_note, "EOH-End", sizeof context->end_eval_note));
 
 #ifdef GEOIP2
-	if ((action = eval_end(context, COND_HEADERGEO, COND_BODY)) != NULL) {
-		strlcpy(context->end_eval_note, "EOH-Geo", sizeof context->end_eval_note);
-		return setreply(ctx, context, COND_HEADERGEO, action);
-	}
+	if ((action = eval_end(context, COND_HEADERGEO, COND_BODY)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADERGEO, action,
+					strlcpy(context->end_eval_note, "EOH-Geo", sizeof context->end_eval_note));
 #endif
 
 	return (SMFIS_CONTINUE);
@@ -1125,7 +1212,7 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 				msg(LOG_DEBUG, context, "cb_body('%s')", context->buf);
 			if ((action = eval_cond(context,
 			    COND_BODY, context->buf, NULL)) != NULL)
-				return (setreply(ctx, context, COND_BODY, action));
+				SETREPLY_RETURN_IF_DONE(ctx, context, COND_BODY, action);
 		} else
 			context->pos++;
 	}
@@ -1153,6 +1240,10 @@ cb_eom(SMFICTX *ctx)
 			strlcpy(context->end_eval_note, "EOM", sizeof context->end_eval_note);
 			(void)setreply(ctx, context, COND_BODY, action);
 		}
+
+		if ((action = eval_end(context, COND_COMPARE_CAPTURES, COND_MAX)) != NULL)
+			SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_HEADER, action,
+						strlcpy(context->end_eval_note, "EOM-Captures", sizeof context->end_eval_note));
 	}
 
 	sfsistat result;
@@ -1210,6 +1301,8 @@ cb_eom(SMFICTX *ctx)
 		}
 	}
 
+	setreply_lognotice(context);
+
 	if (context->action && (context->action->type == ACTION_QUARANTINE) /* context->quarantine != NULL */ ) {
 		if (smfi_quarantine(ctx, context->action->msg /* context->quarantine */) != MI_SUCCESS)
 			msg(LOG_ERR, context, "cb_eom: smfi_quarantine");
@@ -1224,8 +1317,11 @@ cb_abort(SMFICTX *ctx) {
 
 	context = (struct context *)smfi_getpriv(ctx);
 	msg(LOG_DEBUG, context, "cb_abort()");
-	if (context != NULL)
+	if (context != NULL) {
 		context->message_status = MESSAGE_ABORTED;
+		setreply_lognotice(context);
+	}
+
 	return SMFIS_CONTINUE;
 }
 
@@ -1237,7 +1333,8 @@ cb_close(SMFICTX *ctx)
 	context = (struct context *)smfi_getpriv(ctx);
 	msg(LOG_DEBUG, context, "cb_close()");
 	if (context != NULL) {
-		setreply_lognotice(context);
+		if (context->message_status != MESSAGE_LOGGED)
+			setreply_lognotice(context);
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
 #ifdef GEOIP2
@@ -1247,6 +1344,7 @@ cb_close(SMFICTX *ctx)
 		}
 		geoip2_free_summary(context);
 #endif
+		free_kv_bindings(context->captures);
 		release_ruleset(context->rs);
 		free(context);
 	}

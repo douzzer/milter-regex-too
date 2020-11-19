@@ -80,8 +80,11 @@ typedef struct {
 %expect 4
 
 %token	ERROR STRING
-%token	ACCEPT WHITELIST REJECT TEMPFAIL DISCARD QUARANTINE
-%token	CONNECT CONNECTGEO HELO ENVFROM ENVRCPT HEADER HEADERGEO MACRO BODY PHASEDONE
+%token	ACCEPT WHITELIST REJECT TEMPFAIL DISCARD QUARANTINE META
+%token	CONNECT HELO ENVFROM ENVRCPT HEADER MACRO BODY PHASEDONE
+%token	CAPTURE_ONCE_HEADER CAPTURE_ALL_HEADER CAPTURE_MACRO
+%token	COMPARE_HEADER COMPARE_CAPTURES
+%token	CONNECTGEO HEADERGEO CAPTURE_ONCE_HEADER_GEO CAPTURE_ALL_HEADER_GEO CAPTURE_MACRO_GEO
 %token	AND OR NOT
 %type	<v.string>	STRING
 %type	<v.expr>	expr term
@@ -158,6 +161,13 @@ action	: REJECT STRING		{
 			YYERROR;
 		}
 	}
+	| META	{
+		$$ = create_action(rs, ACTION_META, "", yylval.lineno);
+		if ($$ == NULL) {
+			yyerror("yyparse: create_action");
+			YYERROR;
+		}
+	}
 	;
 
 expr_l	: expr			{
@@ -205,7 +215,87 @@ expr	: term			{
 	}
 	;
 
-term	: CONNECT STRING STRING	{
+term	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
+		$$ = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+	}
+	| CAPTURE_ALL_HEADER STRING STRING STRING	{
+		$$ = create_cond_4(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+	}
+	| CAPTURE_ONCE_HEADER_GEO STRING STRING STRING STRING	{
+#ifdef GEOIP2
+		$$ = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+		free($5);
+#else
+		YYERROR;
+#endif
+	}
+	| CAPTURE_ALL_HEADER_GEO STRING STRING STRING STRING	{
+#ifdef GEOIP2
+		$$ = create_cond_4(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+		free($5);
+#else
+		YYERROR;
+#endif
+	}
+	| CAPTURE_MACRO STRING STRING STRING	{
+		$$ = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+	}
+	| CAPTURE_MACRO_GEO STRING STRING STRING STRING	{
+#ifdef GEOIP2
+		$$ = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, $5);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+		free($5);
+#else
+		YYERROR;
+#endif
+	}
+	| COMPARE_CAPTURES STRING STRING STRING STRING	{
+		$$ = create_cond_4(rs, COND_COMPARE_CAPTURES, $2, $3, $4, $5);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+		free($5);
+	}
+	| COMPARE_HEADER STRING STRING STRING	{
+		$$ = create_cond_4(rs, COND_COMPARE_HEADER, $2, $3, $4, NULL);
+		if ($$ == NULL)
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+	}
+	| CONNECT STRING STRING	{
 		$$ = create_cond(rs, COND_CONNECT, $2, $3);
 		if ($$ == NULL)
 			YYERROR;
@@ -213,11 +303,15 @@ term	: CONNECT STRING STRING	{
 		free($3);
 	}
 	| CONNECTGEO STRING STRING	{
+#ifdef GEOIP2
 		$$ = create_cond(rs, COND_CONNECTGEO, $2, $3);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 		free($3);
+#else
+		YYERROR;
+#endif
 	}
 	| HELO STRING		{
 		$$ = create_cond(rs, COND_HELO, $2, NULL);
@@ -245,13 +339,17 @@ term	: CONNECT STRING STRING	{
 		free($3);
 	}
 	| HEADERGEO STRING STRING STRING STRING	{
-	  $$ = create_cond_4(rs, COND_HEADERGEO, $2, $3, $4, $5);
+#ifdef GEOIP2
+		$$ = create_cond_4(rs, COND_HEADERGEO, $2, $3, $4, $5);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 		free($3);
 		free($4);
 		free($5);
+#else
+		YYERROR;
+#endif
 	}
 	| MACRO STRING STRING	{
 		$$ = create_cond(rs, COND_MACRO, $2, $3);
@@ -322,15 +420,34 @@ static const struct keywords keywords[] = {
 	{ "accept",	ACCEPT,		K_TYPE_ACTION,	ACTION_ACCEPT },
 	{ "and",	AND,		K_TYPE_EXPR,	EXPR_AND },
 	{ "body",	BODY,		K_TYPE_COND,	COND_BODY },
+	{ "capture_all_header",	CAPTURE_ALL_HEADER,		K_TYPE_COND,	COND_CAPTURE_ALL_HEADER },
+#ifdef GEOIP2
+	{ "capture_all_header_geo",	CAPTURE_ALL_HEADER_GEO,	K_TYPE_COND,	COND_CAPTURE_ALL_HEADER_GEO },
+#endif
+	{ "capture_macro",	CAPTURE_MACRO,		K_TYPE_COND,	COND_CAPTURE_MACRO },
+#ifdef GEOIP2
+	{ "capture_macro_geo",	CAPTURE_MACRO_GEO,	K_TYPE_COND,	COND_CAPTURE_MACRO_GEO },
+#endif
+	{ "capture_once_header",	CAPTURE_ONCE_HEADER,		K_TYPE_COND,	COND_CAPTURE_ONCE_HEADER },
+#ifdef GEOIP2
+	{ "capture_once_header_geo",	CAPTURE_ONCE_HEADER_GEO,	K_TYPE_COND,	COND_CAPTURE_ONCE_HEADER_GEO },
+#endif
+	{ "compare_captures",	COMPARE_CAPTURES,	K_TYPE_COND,	COND_COMPARE_CAPTURES },
+	{ "compare_header",	COMPARE_HEADER,		K_TYPE_COND,	COND_COMPARE_HEADER },
 	{ "connect",	CONNECT,	K_TYPE_COND,	COND_CONNECT },
+#ifdef GEOIP2
 	{ "connectgeo",	CONNECTGEO,	K_TYPE_COND,	COND_CONNECTGEO },
+#endif
 	{ "discard",	DISCARD,	K_TYPE_ACTION,	ACTION_DISCARD },
 	{ "envfrom",	ENVFROM,	K_TYPE_COND,	COND_ENVFROM },
 	{ "envrcpt",	ENVRCPT,	K_TYPE_COND,	COND_ENVRCPT },
 	{ "header",	HEADER,		K_TYPE_COND,	COND_HEADER },
+#ifdef GEOIP2
 	{ "headergeo",	HEADERGEO,	K_TYPE_COND,	COND_HEADERGEO },
+#endif
 	{ "helo",	HELO,		K_TYPE_COND,	COND_HELO },
 	{ "macro",	MACRO,		K_TYPE_COND,	COND_MACRO },
+	{ "meta",	META,		K_TYPE_ACTION,	ACTION_META },
 	{ "not",	NOT,		K_TYPE_EXPR,	EXPR_NOT },
 	{ "or",		OR,		K_TYPE_EXPR,	EXPR_OR },
 	{ "phasedone",	PHASEDONE,	K_TYPE_COND,	COND_PHASEDONE },

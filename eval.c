@@ -40,6 +40,7 @@ static __attribute__((unused)) const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/
 #include <string.h>
 #include <sys/time.h>
 #include <ctype.h>
+#include <syslog.h>
 
 #include "milter-regex.h"
 
@@ -110,101 +111,6 @@ create_ruleset(void)
 }
 
 struct expr *
-create_cond(struct ruleset *rs, int type, const char *a, const char *b)
-{
-	struct cond *c = NULL;
-	struct cond_list *cl = NULL;
-	struct expr *e = NULL;
-	struct expr_list *elc = NULL;
-
-	eval_mutex_lock();
-	e = calloc(1, sizeof(struct expr));
-	if (e == NULL)
-		goto error;
-	elc = calloc(1, sizeof(struct expr_list));
-	if (elc == NULL)
-		goto error;
-
-	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
-		if ((cl->cond->args[0].src == NULL) != (a == NULL) ||
-		    (cl->cond->args[1].src == NULL) != (b == NULL) ||
-		    (a != NULL && strcmp(a, cl->cond->args[0].src)) ||
-		    (b != NULL && strcmp(b, cl->cond->args[1].src)))
-			continue;
-		break;
-	}
-	if (cl != NULL)
-		c = cl->cond;
-	else {
-		cl = calloc(1, sizeof(struct cond_list));
-		if (cl == NULL)
-			goto error;
-		c = calloc(1, sizeof(struct cond));
-		if (c == NULL)
-			goto error;
-
-		if (a != NULL) {
-			c->args[0].src = strdup(a);
-			if (c->args[0].src == NULL)
-				goto error;
-			c->type = type;
-#ifdef GEOIP2
-			if (type == COND_CONNECTGEO) {
-				if (build_geoip2_path(&c->args[0]))
-					goto error;
-			} else {
-#endif
-				if (build_regex(&c->args[0]))
-					goto error;
-#ifdef GEOIP2
-			}
-#endif
-		}
-		if (b != NULL) {
-			c->args[1].src = strdup(b);
-			if (c->args[1].src == NULL)
-				goto error;
-			if (build_regex(&c->args[1]))
-				goto error;
-		}
-		c->idx = rs->maxidx++;
-		cl->cond = c;
-		cl->next = rs->cond[type];
-		rs->cond[type] = cl;
-	}
-
-	e->type = EXPR_COND;
-	e->cond = c;
-	e->idx = rs->maxidx++;
-	elc->expr = e;
-	elc->next = c->expr;
-	c->expr = elc;
-	eval_mutex_unlock();
-	return (e);
-
-error:
-	if (elc != NULL)
-		free(elc);
-	if (e != NULL)
-		free(e);
-	if (cl != NULL)
-		free(cl);
-	if (c != NULL) {
-		if (!c->args[1].empty)
-			regfree(&c->args[1].re);
-		if (c->args[1].src != NULL)
-			free(c->args[1].src);
-		if (!c->args[0].empty)
-			regfree(&c->args[0].re);
-		if (c->args[0].src != NULL)
-			free(c->args[0].src);
-		free(c);
-	}
-	eval_mutex_unlock();
-	return (NULL);
-}
-
-struct expr *
 create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d)
 {
 	struct cond *cond = NULL;
@@ -220,6 +126,7 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 	if (elc == NULL)
 		goto error;
 
+	/* if this exact condition was used earlier in the config file, recycle it. */
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
 		if ((cl->cond->args[0].src == NULL) != (a == NULL) ||
 		    (cl->cond->args[1].src == NULL) != (b == NULL) ||
@@ -248,6 +155,9 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 			cond->args[0].src = strdup(a);
 			if (cond->args[0].src == NULL)
 				goto error;
+			if (type == COND_COMPARE_CAPTURES) {
+				/* nothing to prepare. */
+			} else
 #ifdef GEOIP2
 			if (type == COND_CONNECTGEO) {
 				if (build_geoip2_path(&cond->args[0]))
@@ -267,18 +177,46 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 			if (build_regex(&cond->args[1]))
 				goto error;
 #ifdef GEOIP2
-			if ((type == COND_HEADERGEO) && (cond->args[1].not || cond->args[1].empty)) {
-				yyerror("create_cond_4: headergeo 2nd arg must not be empty or negated");
+			if ((type == COND_HEADERGEO) &&
+			    (cond->args[1].not || cond->args[1].empty)) {
+				yyerror("create_cond_4: 2nd arg (capture arg) must not be empty or negated");
 				goto error;
 			}
 #endif
+
+			if (((type == COND_CAPTURE_ONCE_HEADER) ||
+			     (type == COND_CAPTURE_ALL_HEADER) ||
+			     (type == COND_CAPTURE_MACRO) ||
+			     (type == COND_COMPARE_HEADER) ||
+			     (type == COND_COMPARE_CAPTURES)
+#ifdef GEOIP2
+			     || (type == COND_CAPTURE_ONCE_HEADER_GEO) ||
+			     (type == COND_CAPTURE_ALL_HEADER_GEO) ||
+			     (type == COND_CAPTURE_MACRO_GEO)
+#endif
+			     ) &&
+			    cond->args[1].not) {
+				yyerror("create_cond_4: 2nd arg (capture arg) must not be negated");
+				goto error;
+			}
+
 		}
 		if (c != NULL) {
 			cond->args[2].src = strdup(c);
 			if (cond->args[2].src == NULL)
 				goto error;
+			if ((type == COND_CAPTURE_ONCE_HEADER) ||
+			    (type == COND_CAPTURE_ALL_HEADER) ||
+			    (type == COND_CAPTURE_MACRO) ||
+			    (type == COND_COMPARE_HEADER) ||
+			    (type == COND_COMPARE_CAPTURES)) {
+				/* nothing to prepare. */
+			} else
 #ifdef GEOIP2
-			if (type == COND_HEADERGEO) {
+			if ((type == COND_HEADERGEO) ||
+			    (type == COND_CAPTURE_ONCE_HEADER_GEO) ||
+			    (type == COND_CAPTURE_ALL_HEADER_GEO) ||
+			    (type == COND_CAPTURE_MACRO_GEO)) {
 				if (build_geoip2_path(&cond->args[2]))
 					goto error;
 			} else {
@@ -293,8 +231,22 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 			cond->args[3].src = strdup(d);
 			if (cond->args[3].src == NULL)
 				goto error;
-			if (build_regex(&cond->args[3]))
-				goto error;
+#ifdef GEOIP2
+			if ((type == COND_CAPTURE_ONCE_HEADER_GEO) ||
+			    (type == COND_CAPTURE_ALL_HEADER_GEO) ||
+			    (type == COND_CAPTURE_MACRO_GEO)) {
+				/* nothing to prepare. */
+			} else
+#endif
+			{
+				if (build_regex(&cond->args[3]))
+					goto error;
+				if ((type == COND_COMPARE_CAPTURES) &&
+				    cond->args[3].not) {
+				  yyerror("create_cond_4: 4th arg (capture arg) must not be negated");
+				  goto error;
+				}
+			}
 		}
 
 		cond->idx = rs->maxidx++;
@@ -330,6 +282,12 @@ error:
 	}
 	eval_mutex_unlock();
 	return (NULL);
+}
+
+struct expr *
+create_cond(struct ruleset *rs, int type, const char *a, const char *b)
+{
+  return create_cond_4(rs, type, a, b, NULL, NULL);
 }
 
 struct expr *
@@ -432,6 +390,10 @@ eval_cond_1(struct context *context, int type,
 	struct cond_list *cl;
 	struct action_list *al;
 
+	int initial_captures_change_count = context->captures_change_count;
+
+again:
+
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
 		int r;
 		if (res[cl->cond->idx] != VAL_UNDEF)
@@ -442,9 +404,19 @@ eval_cond_1(struct context *context, int type,
 		else if (!r)
 			push_cond_result(cl->cond, VAL_TRUE, res);
 	}
-	for (al = rs->action; al != NULL; al = al->next)
+	for (al = rs->action; al != NULL; al = al->next) {
+		if (al->action->type == ACTION_META)
+			continue;
 		if (res[al->action->idx] == VAL_TRUE)
 			return (al->action);
+	}
+
+	if ((type != COND_COMPARE_CAPTURES) &&
+	    (context->captures_change_count != initial_captures_change_count)) {
+		type = COND_COMPARE_CAPTURES;
+		goto again;
+	}
+
 	return (NULL);
 }
 
@@ -487,13 +459,16 @@ eval_end(struct context *context, int type, __attribute__((unused)) int max)
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
 		if (res[cl->cond->idx] == VAL_UNDEF)
 			push_cond_result(cl->cond, VAL_FALSE, res);
-	for (al = rs->action; al != NULL; al = al->next)
+	for (al = rs->action; al != NULL; al = al->next) {
+		if (al->action->type == ACTION_META)
+			continue;
 		if (res[al->action->idx] == VAL_TRUE) {
 			eval_mutex_unlock();
 			if (debug)
 				context->eval_time_cum += now_usecs() - start_at;
 			return (al->action);
 		}
+	}
 #if 0
 	for (type = max; type < COND_MAX; ++type) {
 		if (type == COND_PHASEDONE)
@@ -532,12 +507,564 @@ eval_clear(struct context *context, int type)
 		context->eval_time_cum += now_usecs() - start_at;
 }
 
+int insert_kv_binding(struct context *context, const char *key, const char *val, size_t val_len, struct kv_binding **point) {
+	struct kv_binding *new_kv = malloc(sizeof *new_kv + val_len + 1);
+	struct kv_binding *local_point = 0;
+	if (! new_kv)
+		return -1;
+	if (! point)
+	  point = &local_point;
+	new_kv->key = key;
+	new_kv->val_len = val_len;
+	memcpy(new_kv->val, val, val_len);
+	new_kv->val[val_len] = 0;
+	if (! *point) {
+		for (struct kv_binding *i = context->captures; i; i = i->next) {
+			if (! strcmp(i->key,key))
+				*point = i;
+			else if (*point)
+				break;
+		}
+	}
+	if (*point) {
+		new_kv->prev = *point;
+		new_kv->next = (*point)->next;
+		(*point)->next = new_kv;
+	} else {
+		new_kv->prev = 0;
+		new_kv->next = context->captures;
+		context->captures = new_kv;
+	}
+	if (new_kv->next)
+		new_kv->next->prev = new_kv;
+	*point = new_kv;
+
+	msg(LOG_DEBUG, context, "inserted KV \"%s\" = \"%.*s\"", key, (int)val_len, val);
+	++context->captures_change_count;
+
+	return 0;
+}
+
+const char *get_kv_binding_next(const struct kv_binding **next) {
+	if (! *next)
+		return 0;
+	const char *ret = (*next)->val;
+	if ((*next)->next && (! strcmp((*next)->key, (*next)->next->key)))
+		*next = (*next)->next;
+	else
+		*next = 0;
+	return ret;
+}
+
+const char *get_kv_binding_first(struct context *context, const char *key, const struct kv_binding **next) {
+	for (struct kv_binding *i = context->captures; i; i = i->next) {
+		if (! strcmp(i->key,key)) {
+			*next = i;
+			return get_kv_binding_next(next);
+		}
+	}
+	return 0;
+}
+
+void free_kv_bindings(struct kv_binding *list) {
+	while (list) {
+		struct kv_binding *next = list->next;
+		free(list);
+		list = next;
+	}
+}
+
+static int compare_values(const char *first, size_t first_len, struct cond_arg *first_cond,
+			  const char *second, size_t second_len, struct cond_arg *second_cond) {
+
+	if (first_len == second_len)
+		return memcmp(first, second, first_len);
+	else if (second_len > first_len) {
+		if (first_cond->compare_as_suffix) {
+			if (! memcmp(first, second + (second_len - first_len), first_len))
+				return 0;
+		}
+		if (first_cond->compare_as_dname_suffix) {
+			if ((*(second + (second_len - first_len) - 1) == '.') &&
+			    (! memcmp(first, second + (second_len - first_len), first_len)))
+				return 0;
+		}
+		if (first_cond->compare_as_prefix) {
+			if (! memcmp(first, second, first_len))
+				return 0;
+		}
+		if (first_cond->compare_as_dname_prefix) {
+			if ((second[first_len] == '.') &&
+			    (! memcmp(first, second, first_len)))
+				return 0;
+		}
+	} else {
+		if (second_cond->compare_as_suffix) {
+			if (! memcmp(second, first + (first_len - second_len), second_len))
+				return 0;
+		}
+		if (second_cond->compare_as_dname_suffix) {
+			if ((*(first + (first_len - second_len) - 1) == '.') &&
+			    (! memcmp(second, first + (first_len - second_len), second_len)))
+				return 0;
+		}
+		if (second_cond->compare_as_prefix) {
+			if (! memcmp(second, first, second_len))
+				return 0;
+		}
+		if (second_cond->compare_as_dname_prefix) {
+			if ((first[second_len] == '.') &&
+			    (! memcmp(second, first, second_len)))
+				return 0;
+		}
+	}
+	return 1;
+}
+
+
+static __attribute__((unused)) const char *cond_str(int cond) {
+	switch(cond) {
+	case COND_NONE:
+		return "none";
+	case COND_CAPTURE_MACRO:
+		return "capture_macro";
+#ifdef GEOIP2
+	case COND_CAPTURE_MACRO_GEO:
+		return "capture_macro_geo";
+#endif
+	case COND_MACRO:
+		return "macro";
+	case COND_CONNECT:
+		return "connect";
+#ifdef GEOIP2
+	case COND_CONNECTGEO:
+		return "connectgeo";
+#endif
+	case COND_HELO:
+		return "helo";
+	case COND_ENVFROM:
+		return "envfrom";
+	case COND_ENVRCPT:
+		return "envrcpt";
+	case COND_CAPTURE_ONCE_HEADER:
+		return "capture_once_header";
+	case COND_CAPTURE_ALL_HEADER:
+		return "capture_all_header";
+#ifdef GEOIP2
+	case COND_CAPTURE_ONCE_HEADER_GEO:
+		return "capture_once_header_geo";
+	case COND_CAPTURE_ALL_HEADER_GEO:
+		return "capture_all_header_geo";
+#endif
+	case COND_COMPARE_HEADER:
+		return "compare_header";
+	case COND_COMPARE_CAPTURES:
+		return "compare_captures";
+	case COND_HEADER:
+		return "header";
+#ifdef GEOIP2
+	case COND_HEADERGEO:
+		return "headergeo";
+#endif
+	case COND_BODY:
+		return "body";
+	case COND_PHASEDONE:
+		return "phasedone";
+	case COND_MAX:
+		return "max";
+	default:
+		return "unknown cond";
+	}
+}
+
+static int get_envelope_member(struct context *context, const char *name, const char **value, size_t *value_len) {
+	if (! name)
+		return -EINVAL;
+
+#define CHECK_ENVELOPE(checkname, membername) if (! strcmp(name,checkname)) { *value = context->membername; *value_len = strnlen(context->membername, sizeof context->membername); return 0; }
+
+	switch(name[0]) {
+	case 'c':
+		CHECK_ENVELOPE("client_resolve", client_resolve);
+		CHECK_ENVELOPE("connect:hostname", host_name);
+		CHECK_ENVELOPE("connect:address", host_addr);
+#ifdef GEOIP2
+		if (! strcmp(name,"connect:geoip")) {
+			if (! context->geoip2_result_summary) {
+				if (prime_geoip2(context) == 0)
+					(void)geoip2_refresh_summary(context);
+			}
+			if (context->geoip2_result_summary) {
+				*value = context->geoip2_result_summary;
+				*value_len = strlen(*value);
+				return 0;
+			} else
+				return -ENOENT;
+		}
+#endif
+		return -ENOENT;
+	case 'e':
+		CHECK_ENVELOPE("envfrom", env_from);
+		CHECK_ENVELOPE("envrcpt", env_rcpt);
+		return -ENOENT;
+	case 'f':
+		CHECK_ENVELOPE("from", hdr_from);
+		return -ENOENT;
+	case 'h':
+		CHECK_ENVELOPE("helo", helo);
+		return -ENOENT;
+	case 'l':
+		if (! strncmp(name,"literal:",strlen("literal:"))) {
+			*value = name + strlen("literal:");
+			*value_len = strlen(*value);
+			return 0;
+		}
+		return -ENOENT;
+	case 'm':
+		CHECK_ENVELOPE("message_id", message_id);
+		CHECK_ENVELOPE("my_name", my_name);
+		return -ENOENT;
+	case 's':
+		CHECK_ENVELOPE("subject", hdr_subject);
+		return -ENOENT;
+	case 't':
+		CHECK_ENVELOPE("tls_status", tls_status);
+		CHECK_ENVELOPE("to", hdr_to);
+		return -ENOENT;
+	default:
+		return -ENOENT;
+	}
+}
+
 static int
 check_cond(struct context *context, struct cond *c, const char *a, const char *b)
 {
 	++context->check_cond_count;
+
+	switch (c->type) {
+
+	case COND_PHASEDONE: {
+		if ((! c->args[0].src) || c->args[0].empty) /* nonsense existence check */
+			return c->args[0].not;
+		if (context->last_phase_done == COND_NONE)
+			return 1;
+		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
+		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
+		if (r && r != REG_NOMATCH)
+			return -1;
+		else if ((r == REG_NOMATCH) != c->args[0].not)
+			return 1;
+		else
+			return 0;
+	}
+
+	case COND_CAPTURE_ONCE_HEADER:
+	case COND_CAPTURE_ALL_HEADER: {
+		/* capture_header <header_LHS_match_re> <header_RHS_selector_re> <varname> */
+
+		if ((! a) || (! b))
+			return -1;
+
+		int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+		if (r && r != REG_NOMATCH)
+			return -1;
+		if ((r == REG_NOMATCH) != c->args[0].not)
+			return 1;
+
+		ssize_t b_len_left = (ssize_t)strlen(b);
+
+		if (c->args[1].empty) {
+		  insert_kv_binding(context, c->args[2].src, b, b_len_left, 0);
+		  return c->type == COND_CAPTURE_ALL_HEADER; /* return false to arrange for calls on every header regardless of earlier match. */
+		}
+
+		const char *b_ptr = b;
+		regmatch_t matches[8];
+		struct kv_binding *point = 0;
+		int n_inserted = 0;
+
+		while (b_len_left > 0) {
+			r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
+			if (r) {
+				if (r != REG_NOMATCH)
+					return -1;
+				else
+					break;
+			}
+
+			for (int i=1; i<8; ++i) {
+				if (matches[i].rm_so == -1)
+					continue;
+				insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+				++n_inserted;
+			}
+
+			if (! c->args[1].global)
+			  break;
+
+			b_len_left -= matches[0].rm_eo;
+			b_ptr += matches[0].rm_eo;
+		}
+
+		if (c->type == COND_CAPTURE_ALL_HEADER)
+			return 1; /* return false to arrange for calls on every header regardless of earlier match. */
+		else
+			return (n_inserted > 0) ? 0 : 1;
+	}
+
 #ifdef GEOIP2
-	if (c->type == COND_CONNECTGEO) {
+	case COND_CAPTURE_ONCE_HEADER_GEO:
+	case COND_CAPTURE_ALL_HEADER_GEO: {
+		/* capture_header_geo <header_LHS_match_re> <header_RHS_selector_re> <geo_ip_path> <varname> */
+
+		return -1;
+	}
+#endif
+
+	case COND_CAPTURE_MACRO: {
+		/* capture_macro <macro_LHS_match_re> <macro_RHS_selector_re> <varname> */
+
+		if ((! a) || (! b))
+			return -1;
+
+		int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+		if (r && r != REG_NOMATCH)
+			return -1;
+		if ((r == REG_NOMATCH) != c->args[0].not)
+			return 1;
+
+		ssize_t b_len_left = (ssize_t)strlen(b);
+
+		if (c->args[1].empty) {
+		  insert_kv_binding(context, c->args[2].src, b, b_len_left, 0);
+		  return 0;
+		}
+
+		const char *b_ptr = b;
+		regmatch_t matches[8];
+		struct kv_binding *point = 0;
+		int n_inserted = 0;
+
+		while (b_len_left > 0) {
+			r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
+			if (r) {
+				if (r != REG_NOMATCH)
+					return -1;
+				else
+					break;
+			}
+
+			for (int i=1; i<8; ++i) {
+				if (matches[i].rm_so == -1)
+					continue;
+				insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+				++n_inserted;
+			}
+
+			if (! c->args[1].global)
+			  break;
+
+			b_len_left -= matches[0].rm_eo;
+			b_ptr += matches[0].rm_eo;
+		}
+
+		return (n_inserted > 0) ? 0 : 1;
+	}
+
+#ifdef GEOIP2
+	case COND_CAPTURE_MACRO_GEO: {
+		/* capture_macro_geo <macro_LHS_match_re> <macro_RHS_selector_re> <geo_ip_path> <varname> */
+
+		return -1;
+	}
+#endif
+
+	case COND_COMPARE_HEADER: {
+		/* <header_LHS_match_re> <header_RHS_selector_re> [!]<connect:host|connect:addr|helo|envfrom|envrcpt|var:name> [macro_RHS_selector_re] */
+	  return -1;
+	}
+
+	case COND_COMPARE_CAPTURES: {
+		/* compare_captures <connect:host|connect:addr|helo|envfrom|envrcpt|var:name> <value_selector_re1> <connect:host|connect:addr|helo|envfrom|envrcpt|var:name> <value_selector_re2> */
+		/* (cond->args[1].src and [3].src can safely be null, though that's not currently used.) */
+
+		/* test passes if any of vals for the first key equal any of the vals for the second. */
+
+		/*
+		 * note this is quite an elaborate nested loop proposition.  not only
+		 * is there iteration among all members of each set, but for the _re
+		 * variant, for each member there is iteration through captures, not
+		 * just through captures via a multi-capture RE, but for global-tagged
+		 * REs, through all captures tiling the RE across each member.  the
+		 * cumulative iterator depth is 6, but looks like 4 because the two
+		 * stages of RE iteration are done with goto.
+		 */
+
+		const struct kv_binding *first_operand_i, *second_operand_i;
+		const char *first_operand_preselection = get_kv_binding_first(context, c->args[0].src, &first_operand_i);
+		size_t first_operand_preselection_len = 0;
+		if (! first_operand_preselection) {
+		  if (get_envelope_member(context, c->args[0].src, &first_operand_preselection, &first_operand_preselection_len) < 0)
+		    break;
+		  first_operand_i = 0;
+		}
+
+		const char *second_operand_preselection = get_kv_binding_first(context, c->args[2].src, &second_operand_i);
+		size_t second_operand_preselection_len = 0;
+		if (! second_operand_preselection) {
+		  if (get_envelope_member(context, c->args[2].src, &second_operand_preselection, &second_operand_preselection_len) < 0)
+		    break;
+		  second_operand_i = 0;
+		}
+
+		for (; first_operand_preselection; first_operand_preselection = first_operand_i ? get_kv_binding_next(&first_operand_i) : 0) {
+		  const char *first_operand;
+		  size_t first_operand_len;
+
+		  ssize_t first_operand_len_left = first_operand_preselection_len ? (ssize_t)first_operand_preselection_len : (ssize_t)strlen(first_operand_preselection);
+		  const char *first_operand_ptr = first_operand_preselection;
+		  regmatch_t first_operand_matches[8];
+		  int first_operand_matches_i = 0;
+
+		  while (first_operand_len_left > 0) {
+
+		    if (c->args[1].src && ! c->args[1].empty) {
+		      /* if multiple selections, need to iterate through the selections. */
+
+		      if (first_operand_matches_i == 0) {
+			int r = regexec(&c->args[1].re,
+					first_operand_ptr,
+					sizeof first_operand_matches / sizeof first_operand_matches[0],
+					first_operand_matches,
+					(first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
+			if (r) {
+			  if (r != REG_NOMATCH)
+			    return -1;
+			  else
+			    goto continue_0;
+			}
+
+			first_operand_len_left -= first_operand_matches[0].rm_eo;
+			first_operand_ptr += first_operand_matches[0].rm_eo;
+
+		      }
+
+		    next_first_operand_match:
+
+		      ++first_operand_matches_i;
+		      if (first_operand_matches_i >= (int)(sizeof first_operand_matches / sizeof first_operand_matches[0])) {
+
+			if (! c->args[1].global)
+			  break;
+
+			first_operand_matches_i = 0;
+			continue;
+		      }
+		      if (first_operand_matches[first_operand_matches_i].rm_so == -1)
+			goto next_first_operand_match;
+
+		      first_operand = first_operand_preselection + first_operand_matches[first_operand_matches_i].rm_so;
+		      first_operand_len = first_operand_matches[first_operand_matches_i].rm_eo - first_operand_matches[first_operand_matches_i].rm_so;
+
+		    } else {
+
+		      first_operand = first_operand_preselection;
+		      first_operand_len = first_operand_len_left;
+		      first_operand_len_left = 0;
+
+		    }
+
+		    for (;
+			 second_operand_preselection;
+			 second_operand_preselection = second_operand_i ? get_kv_binding_next(&second_operand_i) : 0) {
+		      const char *second_operand;
+		      size_t second_operand_len;
+
+		      ssize_t second_operand_len_left =
+			      second_operand_preselection_len ?
+			      (ssize_t)second_operand_preselection_len :
+			      (ssize_t)strlen(second_operand_preselection);
+		      const char *second_operand_ptr = second_operand_preselection;
+		      regmatch_t second_operand_matches[8];
+		      int second_operand_matches_i = 0;
+
+		      while (second_operand_len_left > 0) {
+
+			if (c->args[3].src && ! c->args[3].empty) {
+			  /* if multiple selections, need to iterate through the selections. */
+
+			  if (second_operand_matches_i == 0) {
+			    int r = regexec(&c->args[3].re, second_operand_ptr,
+					    sizeof second_operand_matches / sizeof second_operand_matches[0],
+					    second_operand_matches,
+					    (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
+			    if (r) {
+			      if (r != REG_NOMATCH)
+				return -1;
+			      else
+				goto continue_2;
+			    }
+
+			    second_operand_len_left -= second_operand_matches[0].rm_eo;
+			    second_operand_ptr += second_operand_matches[0].rm_eo;
+
+			  }
+
+			next_second_operand_match:
+
+			  ++second_operand_matches_i;
+			  if (second_operand_matches_i >= (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) {
+
+			    if (! c->args[3].global)
+			      goto continue_2;
+
+			    second_operand_matches_i = 0;
+			    continue;
+			  }
+			  if (second_operand_matches[second_operand_matches_i].rm_so == -1)
+			    goto next_second_operand_match;
+
+			  second_operand = second_operand_preselection + second_operand_matches[second_operand_matches_i].rm_so;
+			  second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
+
+			} else {
+
+			  second_operand = second_operand_preselection;
+			  second_operand_len = second_operand_len_left;
+			  second_operand_len_left = 0;
+
+			}
+
+			if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) == 0)
+			  return 0;
+
+			/* end iteration for RE matches inside the current second operand */
+		      }
+
+		    continue_2:
+		      ;
+
+		      /* end iteration through values for the second operand */
+		    }
+
+		    if (! c->args[1].src)
+		      break;
+
+		    /* end iteration for RE matches inside the current first operand */
+		  }
+
+
+		continue_0:
+		  ;
+		  /* end iteration through values for the first operand */
+		}
+
+		/* null intersection, return false and try again after the next KV insertion. */
+		return 1;
+	}
+
+#ifdef GEOIP2
+	case COND_CONNECTGEO: {
 
 		if ((! c->args[0].geoip2_path[0]) || (! geoip2_db_path))
 			return 0; /* GeoIP2 not configured or not working -- fail open. */
@@ -589,8 +1116,9 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			return matched;
 		} else
 			return c->args[1].not ? 0 : 1; /* leaf lookup failed -- fail closed. */
+	}
 
-	} else if (c->type == COND_HEADERGEO) {
+	case COND_HEADERGEO: {
 
 /* headergeo /header-name-pattern/ /address-match-pattern/ /geo/record/path /geo-record-pattern/ */
 
@@ -701,22 +1229,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 		return c->args[3].not ? 0 : 1;
 	}
-
 #endif
 
-	if (c->type == COND_PHASEDONE) {
-		if ((! c->args[0].src) || c->args[0].empty) /* nonsense existence check */
-			return c->args[0].not;
-		if (context->last_phase_done == COND_NONE)
-			return 1;
-		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
-		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
-		if (r && r != REG_NOMATCH)
-			return -1;
-		else if ((r == REG_NOMATCH) != c->args[0].not)
-			return 1;
-		else
-			return 0;
+	default:
+		break;
 	}
 
 	for (int i = 0; i < 2; ++i) {
@@ -823,6 +1339,11 @@ build_regex(struct cond_arg *a)
 {
 	char del;
 	const char *s = a->src, *t;
+#ifdef USE_PCRE2
+	int flags = REG_DOTALL; /* ". matches anything including NL" */
+#else
+	int flags = REG_EXTENDED;
+#endif
 
 	a->empty = 1;
 	a->not = 0;
@@ -840,23 +1361,57 @@ build_regex(struct cond_arg *a)
 		yyerror("build_regex: missing closing delimiter %s", a->src);
 		return (1);
 	}
+
+	for (const char *flags_i = s+1; *flags_i; ++flags_i) {
+		switch (*flags_i) {
+		case 'b':
+#ifdef USE_PCRE2
+			yyerror("regex flag b (basic) used but not allowed when USE_PCRE2, in %s", a->src);
+			return (1);
+#else
+			flags |= REG_BASIC;
+			flags &= ~REG_EXTENDED;
+#endif
+			break;
+		case 'e':
+			break;
+		case 'i':
+			flags |= REG_ICASE;
+			break;
+		case 'n':
+			a->not = 1;
+			break;
+		case 'g':
+			a->global = 1;
+			break;
+
+		case 'p':
+			a->compare_as_prefix = 1;
+			break;
+		case 'P':
+			a->compare_as_dname_prefix = 1;
+			break;
+		case 's':
+			a->compare_as_suffix = 1;
+			break;
+		case 'S':
+			a->compare_as_dname_suffix = 1;
+			break;
+
+		default:
+			yyerror("invalid flag %c in %s", *flags_i, a->src);
+			return (1);
+		}
+	}
+
 	if (s == t) {
-		if (s[1]) {
-			if ((s[1] == 'n') && (! s[2])) /* allow negation even on empty regexps */
-				a->not = 1;
-			else {
-				yyerror("build_regex: empty expression with flags %s",
-					a->src);
-				return (1);
-			}
+		if ((flags&REG_ICASE) || a->global) {
+			yyerror("build_regex: nonsensical flag(s) %s associated with empty expression",
+				a->src);
+			return (1);
 		}
 	} else {
 		char *u;
-#ifdef USE_PCRE2
-		int flags = REG_DOTALL; /* ". matches anything including NL" */
-#else
-		int flags = REG_EXTENDED;
-#endif
 		int r;
 
 #if defined(__BSD_VISIBLE) && !defined(USE_PCRE2)
@@ -908,36 +1463,6 @@ build_regex(struct cond_arg *a)
 		u[s - t] = 0;
 #endif
 		s++;
-		while (*s) {
-			switch (*s) {
-			case 'b':
-#ifdef USE_PCRE2
-				yyerror("regex flag b (basic) used but not allowed when USE_PCRE2, in %s", a->src);
-				free(u);
-				return (1);
-#else
-				flags |= REG_BASIC;
-				flags &= ~REG_EXTENDED;
-#endif
-				break;
-			case 'e':
-				break;
-			case 'i':
-				flags |= REG_ICASE;
-				break;
-			case 'n':
-				a->not = 1;
-				break;
-			case 'g':
-				a->global = 1;
-				break;
-			default:
-				yyerror("invalid flag %c in %s", *s, a->src);
-				free(u);
-				return (1);
-			}
-			++s;
-		}
 		r = regcomp(&a->re, u, flags);
 		if (r) {
 			char e[8192];
@@ -950,6 +1475,7 @@ build_regex(struct cond_arg *a)
 		free(u);
 		a->empty = 0;
 	}
+
 	return (0);
 }
 
