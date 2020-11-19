@@ -605,7 +605,7 @@ get_ruleset(void)
 
 	if (load || (cur < 0) || (rs[cur] == NULL)) {
 		int i;
-		char err[8192];
+		char errbuf[8192];
 		int new_cur = -1;
 
 		for (i = 0; i < MAXRS; ++i) {
@@ -623,9 +623,9 @@ get_ruleset(void)
 
 		msg(LOG_DEBUG, NULL, "%sloading configuration file %s", (cur >= 0) ? "re" : "", rule_file_name);
 
-		if (parse_ruleset(rule_file_name, &rs[new_cur], err,
-		    sizeof(err)) || rs[new_cur] == NULL) {
-			msg(LOG_ERR, NULL, "parse_ruleset: %s", err);
+		if (parse_ruleset(rule_file_name, &rs[new_cur], errbuf,
+		    sizeof(errbuf)) || rs[new_cur] == NULL) {
+			msg(LOG_ERR, NULL, "parse_ruleset: %s", errbuf);
 			if (rs[new_cur]) {
 				free_ruleset(rs[new_cur]);
 				rs[new_cur] = 0;

@@ -4,6 +4,11 @@
 #include "eval.h"
 #include <libmilter/mfapi.h>
 
+#ifdef USE_LIBROKEN
+#define HAVE___ATTRIBUTE__
+#include <roken.h>
+#endif
+
 #ifdef GEOIP2
 #include <maxminddb.h>
 

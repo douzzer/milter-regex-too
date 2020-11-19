@@ -34,16 +34,16 @@ else
 endif
 
 ifdef LIBROKEN
-	BROKEN_CFLAGS=-include /usr/include/roken.h
-	BROKEN_LDFLAGS=-lroken
+	BROKEN_CFLAGS=-DUSE_LIBROKEN
+	BROKEN_LDFLAGS=-lroken -lcrypt
 else
 	BROKEN_CFLAGS=
 	BROKEN_LDFLAGS=
 endif
 
-override CFLAGS+=-std=gnu99 -O3 -march=native -g -MMD -DGITVERSION='"$(GITVERSION)"' $(GEOIP_CFLAGS) -DYYERROR_VERBOSE=1 -I/usr/local/include $(BROKEN_CFLAGS) $(GMIME_CFLAGS) $(PCRE2_CFLAGS) -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
+override CFLAGS+=-std=gnu99 -O3 -g -MMD -DGITVERSION='"$(GITVERSION)"' $(GEOIP_CFLAGS) -DYYERROR_VERBOSE=1 -I/usr/local/include $(BROKEN_CFLAGS) $(GMIME_CFLAGS) $(PCRE2_CFLAGS) -Wall -Werror -Wextra -Wformat=2 -Winit-self -Wunknown-pragmas -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wold-style-definition -Wmissing-declarations -Wmissing-format-attribute -Wpointer-arith -Wredundant-decls -Winline -Winvalid-pch -Wno-bad-function-cast
 
-override LDFLAGS+=-L/usr/local/lib $(BROKEN_LDFLAGS) $(GMIME_LDFLAGS) $(PCRE2_LDFLAGS) $(GEOIP_LDFLAGS)
+override LDFLAGS+=-L/usr/local/lib $(GMIME_LDFLAGS) $(PCRE2_LDFLAGS) $(GEOIP_LDFLAGS) $(BROKEN_LDFLAGS)
 
 milter-regex-version.o: milter-regex.o eval.o $(GEOIP_OBJS) strlcat.o strlcpy.o parse.tab.o
 
