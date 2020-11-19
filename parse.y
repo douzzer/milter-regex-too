@@ -118,14 +118,14 @@ macro	: STRING '=' expr	{
 	;
 
 capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL))
+		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL, yylval.lineno))
 			YYERROR;
 		free($2);
 		free($3);
 		free($4);
 	}
 	| CAPTURE_ALL_HEADER STRING STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL))
+		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL, yylval.lineno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -133,7 +133,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_ONCE_HEADER_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5))
+		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5, yylval.lineno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -145,7 +145,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_ALL_HEADER_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5))
+		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5, yylval.lineno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -156,7 +156,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 #endif
 	}
 	| CAPTURE_MACRO STRING STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL))
+		if (! create_capture(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL, yylval.lineno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -164,7 +164,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_MACRO_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_MACRO_GEO, $2, $3, $4, $5))
+		if (! create_capture(rs, COND_CAPTURE_MACRO_GEO, $2, $3, $4, $5, yylval.lineno))
 			YYERROR;
 		free($2);
 		free($3);

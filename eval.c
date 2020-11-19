@@ -346,7 +346,7 @@ create_cond(struct ruleset *rs, int type, const char *a, const char *b)
 }
 
 struct expr *
-create_capture(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d)
+create_capture(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d, int lineno)
 {
 	struct expr *cap_expr = create_cond_4(rs, type, a, b, c, d);
 	if (cap_expr == NULL)
@@ -357,7 +357,7 @@ create_capture(struct ruleset *rs, int type, const char *a, const char *b, const
 		return NULL;
 	}
 
-	struct action *meta = create_action(rs, ACTION_META, "", 0 /* yylval.lineno */);
+	struct action *meta = create_action(rs, ACTION_META, "", lineno);
 	if (meta == NULL) {
 		yyerror("yyparse: create_action");
 		return NULL;
