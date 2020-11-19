@@ -142,6 +142,7 @@ struct ruleset	*create_ruleset(void);
 struct expr	*create_cond(struct ruleset *, int, const char *,
 		    const char *);
 extern struct expr *create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d);
+extern struct expr *create_capture(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d);
 struct expr	*create_expr(struct ruleset *, int, struct expr *,
 		    struct expr *);
 struct action	*create_action(struct ruleset *, int, const char *, int lineno);

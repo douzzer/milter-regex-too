@@ -97,6 +97,61 @@ eval_mutex_unlock(void)
 }
 #endif
 
+static __attribute__((unused)) const char *cond_str(int cond) {
+	switch(cond) {
+	case COND_NONE:
+		return "none";
+	case COND_CAPTURE_MACRO:
+		return "capture_macro";
+#ifdef GEOIP2
+	case COND_CAPTURE_MACRO_GEO:
+		return "capture_macro_geo";
+#endif
+	case COND_MACRO:
+		return "macro";
+	case COND_CONNECT:
+		return "connect";
+#ifdef GEOIP2
+	case COND_CONNECTGEO:
+		return "connectgeo";
+#endif
+	case COND_HELO:
+		return "helo";
+	case COND_ENVFROM:
+		return "envfrom";
+	case COND_ENVRCPT:
+		return "envrcpt";
+	case COND_CAPTURE_ONCE_HEADER:
+		return "capture_once_header";
+	case COND_CAPTURE_ALL_HEADER:
+		return "capture_all_header";
+#ifdef GEOIP2
+	case COND_CAPTURE_ONCE_HEADER_GEO:
+		return "capture_once_header_geo";
+	case COND_CAPTURE_ALL_HEADER_GEO:
+		return "capture_all_header_geo";
+#endif
+	case COND_COMPARE_HEADER:
+		return "compare_header";
+	case COND_COMPARE_CAPTURES:
+		return "compare_captures";
+	case COND_HEADER:
+		return "header";
+#ifdef GEOIP2
+	case COND_HEADERGEO:
+		return "headergeo";
+#endif
+	case COND_BODY:
+		return "body";
+	case COND_PHASEDONE:
+		return "phasedone";
+	case COND_MAX:
+		return "max";
+	default:
+		return "unknown cond";
+	}
+}
+
 struct ruleset *
 create_ruleset(void)
 {
@@ -288,6 +343,29 @@ struct expr *
 create_cond(struct ruleset *rs, int type, const char *a, const char *b)
 {
   return create_cond_4(rs, type, a, b, NULL, NULL);
+}
+
+struct expr *
+create_capture(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d)
+{
+	struct expr *cap_expr = create_cond_4(rs, type, a, b, c, d);
+	if (cap_expr == NULL)
+		return NULL;
+
+	if (cap_expr->cond->expr && cap_expr->cond->expr->next) {
+		yyerror("yyparse: duplicate capture expression");
+		return NULL;
+	}
+
+	struct action *meta = create_action(rs, ACTION_META, "", 0 /* yylval.lineno */);
+	if (meta == NULL) {
+		yyerror("yyparse: create_action");
+		return NULL;
+	}
+
+	cap_expr->action = meta;
+
+	return cap_expr;
 }
 
 struct expr *
@@ -619,62 +697,6 @@ static int compare_values(const char *first, size_t first_len, struct cond_arg *
 		}
 	}
 	return 1;
-}
-
-
-static __attribute__((unused)) const char *cond_str(int cond) {
-	switch(cond) {
-	case COND_NONE:
-		return "none";
-	case COND_CAPTURE_MACRO:
-		return "capture_macro";
-#ifdef GEOIP2
-	case COND_CAPTURE_MACRO_GEO:
-		return "capture_macro_geo";
-#endif
-	case COND_MACRO:
-		return "macro";
-	case COND_CONNECT:
-		return "connect";
-#ifdef GEOIP2
-	case COND_CONNECTGEO:
-		return "connectgeo";
-#endif
-	case COND_HELO:
-		return "helo";
-	case COND_ENVFROM:
-		return "envfrom";
-	case COND_ENVRCPT:
-		return "envrcpt";
-	case COND_CAPTURE_ONCE_HEADER:
-		return "capture_once_header";
-	case COND_CAPTURE_ALL_HEADER:
-		return "capture_all_header";
-#ifdef GEOIP2
-	case COND_CAPTURE_ONCE_HEADER_GEO:
-		return "capture_once_header_geo";
-	case COND_CAPTURE_ALL_HEADER_GEO:
-		return "capture_all_header_geo";
-#endif
-	case COND_COMPARE_HEADER:
-		return "compare_header";
-	case COND_COMPARE_CAPTURES:
-		return "compare_captures";
-	case COND_HEADER:
-		return "header";
-#ifdef GEOIP2
-	case COND_HEADERGEO:
-		return "headergeo";
-#endif
-	case COND_BODY:
-		return "body";
-	case COND_PHASEDONE:
-		return "phasedone";
-	case COND_MAX:
-		return "max";
-	default:
-		return "unknown cond";
-	}
 }
 
 static int get_envelope_member(struct context *context, const char *name, const char **value, size_t *value_len) {

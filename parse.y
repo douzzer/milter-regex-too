@@ -118,54 +118,23 @@ macro	: STRING '=' expr	{
 	;
 
 capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
-
-		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL);
-		if (cap_expr == NULL)
+		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL))
 			YYERROR;
-
-		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
-		if (meta == NULL) {
-			yyerror("yyparse: create_action");
-			YYERROR;
-		}
-
-		cap_expr->action = meta;
-
 		free($2);
 		free($3);
 		free($4);
 	}
 	| CAPTURE_ALL_HEADER STRING STRING STRING	{
-		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL);
-		if (cap_expr == NULL)
+		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL))
 			YYERROR;
-
-		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
-		if (meta == NULL) {
-			yyerror("yyparse: create_action");
-			YYERROR;
-		}
-
-		cap_expr->action = meta;
-
 		free($2);
 		free($3);
 		free($4);
 	}
 	| CAPTURE_ONCE_HEADER_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5);
-		if (cap_expr == NULL)
+		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5))
 			YYERROR;
-
-		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
-		if (meta == NULL) {
-			yyerror("yyparse: create_action");
-			YYERROR;
-		}
-
-		cap_expr->action = meta;
-
 		free($2);
 		free($3);
 		free($4);
@@ -176,18 +145,8 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_ALL_HEADER_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5);
-		if (cap_expr == NULL)
+		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5))
 			YYERROR;
-
-		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
-		if (meta == NULL) {
-			yyerror("yyparse: create_action");
-			YYERROR;
-		}
-
-		cap_expr->action = meta;
-
 		free($2);
 		free($3);
 		free($4);
@@ -197,36 +156,16 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 #endif
 	}
 	| CAPTURE_MACRO STRING STRING STRING	{
-		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL);
-		if (cap_expr == NULL)
+		if (! create_capture(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL))
 			YYERROR;
-
-		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
-		if (meta == NULL) {
-			yyerror("yyparse: create_action");
-			YYERROR;
-		}
-
-		cap_expr->action = meta;
-
 		free($2);
 		free($3);
 		free($4);
 	}
 	| CAPTURE_MACRO_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		struct expr *cap_expr = create_cond_4(rs, COND_CAPTURE_MACRO, $2, $3, $4, $5);
-		if (cap_expr == NULL)
+		if (! create_capture(rs, COND_CAPTURE_MACRO_GEO, $2, $3, $4, $5))
 			YYERROR;
-
-		struct action *meta = create_action(rs, ACTION_META, "", yylval.lineno);
-		if (meta == NULL) {
-			yyerror("yyparse: create_action");
-			YYERROR;
-		}
-
-		cap_expr->action = meta;
-
 		free($2);
 		free($3);
 		free($4);
