@@ -787,17 +787,19 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if ((! a) || (! b))
 			return -1;
 
-		int r = regexec(&c->args[0].re, a, 0, NULL, 0);
-		if (r && r != REG_NOMATCH)
-			return -1;
-		if ((r == REG_NOMATCH) != c->args[0].not)
-			return 1;
+		if (! c->args[0].empty) {
+			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+			if (r && r != REG_NOMATCH)
+				return -1;
+			if ((r == REG_NOMATCH) != c->args[0].not)
+				return 1;
+		}
 
 		ssize_t b_len_left = (ssize_t)strlen(b);
 
 		if (c->args[1].empty) {
-		  insert_kv_binding(context, c->args[2].src, b, b_len_left, 0);
-		  return c->type == COND_CAPTURE_ALL_HEADER; /* return false to arrange for calls on every header regardless of earlier match. */
+			insert_kv_binding(context, c->args[2].src, b, b_len_left, 0);
+			return c->type == COND_CAPTURE_ALL_HEADER; /* return false to arrange for calls on every header regardless of earlier match. */
 		}
 
 		const char *b_ptr = b;
@@ -806,7 +808,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		int n_inserted = 0;
 
 		while (b_len_left > 0) {
-			r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
+			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH)
 					return -1;
@@ -814,11 +816,20 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					break;
 			}
 
-			for (int i=1; i<8; ++i) {
-				if (matches[i].rm_so == -1)
-					continue;
-				insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
-				++n_inserted;
+			for (int i=1;;) {
+				if (matches[i].rm_so != -1) {
+					insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+					++n_inserted;
+				}
+				if (i == 0)
+					break;
+				++i;
+				if (i == (int)(sizeof matches / sizeof matches[0])) {
+					if (! n_inserted)
+						i = 0;
+					else
+						break;
+				}
 			}
 
 			if (! c->args[1].global)
@@ -849,11 +860,13 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if ((! a) || (! b))
 			return -1;
 
-		int r = regexec(&c->args[0].re, a, 0, NULL, 0);
-		if (r && r != REG_NOMATCH)
-			return -1;
-		if ((r == REG_NOMATCH) != c->args[0].not)
-			return 1;
+		if (! c->args[0].empty) {
+			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+			if (r && r != REG_NOMATCH)
+				return -1;
+			if ((r == REG_NOMATCH) != c->args[0].not)
+				return 1;
+		}
 
 		ssize_t b_len_left = (ssize_t)strlen(b);
 
@@ -868,7 +881,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		int n_inserted = 0;
 
 		while (b_len_left > 0) {
-			r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
+			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH)
 					return -1;
@@ -876,11 +889,20 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					break;
 			}
 
-			for (int i=1; i<8; ++i) {
-				if (matches[i].rm_so == -1)
-					continue;
-				insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
-				++n_inserted;
+			for (int i=1;;) {
+				if (matches[i].rm_so != -1) {
+					insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+					++n_inserted;
+				}
+				if (i == 0)
+					break;
+				++i;
+				if (i == (int)(sizeof matches / sizeof matches[0])) {
+					if (! n_inserted)
+						i = 0;
+					else
+						break;
+				}
 			}
 
 			if (! c->args[1].global)
@@ -947,6 +969,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		  const char *first_operand_ptr = first_operand_preselection;
 		  regmatch_t first_operand_matches[8];
 		  int first_operand_matches_i = 0;
+		  int first_operand_n_captures = 0;
 
 		  while (first_operand_len_left > 0) {
 
@@ -974,16 +997,29 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		    next_first_operand_match:
 
 		      ++first_operand_matches_i;
-		      if (first_operand_matches_i >= (int)(sizeof first_operand_matches / sizeof first_operand_matches[0])) {
 
+		      if ((first_operand_matches_i == (int)(sizeof first_operand_matches / sizeof first_operand_matches[0])) &&
+			  (! first_operand_n_captures))
+			      first_operand_matches_i = 0;
+		      else if ((! first_operand_matches_i) ||
+			       (first_operand_matches_i >= (int)(sizeof first_operand_matches / sizeof first_operand_matches[0]))) {
+		      first_operand_matches_done:
 			if (! c->args[1].global)
 			  break;
 
 			first_operand_matches_i = 0;
+			first_operand_n_captures = 0;
+
 			continue;
 		      }
-		      if (first_operand_matches[first_operand_matches_i].rm_so == -1)
-			goto next_first_operand_match;
+		      if (first_operand_matches[first_operand_matches_i].rm_so == -1) {
+			if (! first_operand_matches_i)
+			  goto first_operand_matches_done;
+			else
+			  goto next_first_operand_match;
+		      }
+
+		      ++first_operand_n_captures;
 
 		      first_operand = first_operand_preselection + first_operand_matches[first_operand_matches_i].rm_so;
 		      first_operand_len = first_operand_matches[first_operand_matches_i].rm_eo - first_operand_matches[first_operand_matches_i].rm_so;
@@ -1009,6 +1045,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		      const char *second_operand_ptr = second_operand_preselection;
 		      regmatch_t second_operand_matches[8];
 		      int second_operand_matches_i = 0;
+		      int second_operand_n_captures = 0;
 
 		      while (second_operand_len_left > 0) {
 
@@ -1035,16 +1072,27 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			next_second_operand_match:
 
 			  ++second_operand_matches_i;
-			  if (second_operand_matches_i >= (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) {
 
+			  if ((second_operand_matches_i == (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) &&
+			      (! second_operand_n_captures))
+			    second_operand_matches_i = 0;
+			  else if (second_operand_matches_i >= (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) {
+			  second_operand_matches_done:
 			    if (! c->args[3].global)
 			      goto continue_2;
 
 			    second_operand_matches_i = 0;
+			    second_operand_n_captures = 0;
 			    continue;
 			  }
-			  if (second_operand_matches[second_operand_matches_i].rm_so == -1)
-			    goto next_second_operand_match;
+			  if (second_operand_matches[second_operand_matches_i].rm_so == -1) {
+			    if (! second_operand_matches_i)
+			      goto second_operand_matches_done;
+			    else
+			      goto next_second_operand_match;
+			  }
+
+			  ++second_operand_n_captures;
 
 			  second_operand = second_operand_preselection + second_operand_matches[second_operand_matches_i].rm_so;
 			  second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
@@ -1161,11 +1209,14 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			if (a == NULL)
 				return -1;
 		}
-		int r = regexec(&c->args[0].re, a, 0, NULL, 0);
-		if (r && r != REG_NOMATCH)
-			return -1;
-		if ((r == REG_NOMATCH) != c->args[0].not)
-			return 1;
+
+		if (! c->args[0].empty) {
+			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+			if (r && r != REG_NOMATCH)
+				return -1;
+			if ((r == REG_NOMATCH) != c->args[0].not)
+				return 1;
+		}
 
 		{
 			ssize_t b_len_left = (ssize_t)strlen(b);
@@ -1174,7 +1225,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			char abuf[64];
 
 			while (b_len_left > 0) {
-				r = regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0);
+				int r = regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0);
 				if (r) {
 					if (r != REG_NOMATCH)
 						return -1;
