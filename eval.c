@@ -97,61 +97,6 @@ eval_mutex_unlock(void)
 }
 #endif
 
-static __attribute__((unused)) const char *cond_str(int cond) {
-	switch(cond) {
-	case COND_NONE:
-		return "none";
-	case COND_CAPTURE_MACRO:
-		return "capture_macro";
-#ifdef GEOIP2
-	case COND_CAPTURE_MACRO_GEO:
-		return "capture_macro_geo";
-#endif
-	case COND_MACRO:
-		return "macro";
-	case COND_CONNECT:
-		return "connect";
-#ifdef GEOIP2
-	case COND_CONNECTGEO:
-		return "connectgeo";
-#endif
-	case COND_HELO:
-		return "helo";
-	case COND_ENVFROM:
-		return "envfrom";
-	case COND_ENVRCPT:
-		return "envrcpt";
-	case COND_CAPTURE_ONCE_HEADER:
-		return "capture_once_header";
-	case COND_CAPTURE_ALL_HEADER:
-		return "capture_all_header";
-#ifdef GEOIP2
-	case COND_CAPTURE_ONCE_HEADER_GEO:
-		return "capture_once_header_geo";
-	case COND_CAPTURE_ALL_HEADER_GEO:
-		return "capture_all_header_geo";
-#endif
-	case COND_COMPARE_HEADER:
-		return "compare_header";
-	case COND_COMPARE_CAPTURES:
-		return "compare_captures";
-	case COND_HEADER:
-		return "header";
-#ifdef GEOIP2
-	case COND_HEADERGEO:
-		return "headergeo";
-#endif
-	case COND_BODY:
-		return "body";
-	case COND_PHASEDONE:
-		return "phasedone";
-	case COND_MAX:
-		return "max";
-	default:
-		return "unknown cond";
-	}
-}
-
 struct ruleset *
 create_ruleset(void)
 {
