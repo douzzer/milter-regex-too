@@ -40,6 +40,10 @@
 #endif
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
+
+/* any of these assigned to context->current_phase need to stay in
+ * natural sequence, but needn't be contiguous.
+ */
 typedef enum { COND_NONE=0, COND_CAPTURE_MACRO,
 #ifdef GEOIP2
 	       COND_CAPTURE_MACRO_GEO,
@@ -157,12 +161,13 @@ struct kv_binding {
 	struct kv_binding *prev, *next;
 	const char *key;
 	size_t val_len;
+	cond_t capture_phase;
 	char val[];
 };
 
 extern int insert_kv_binding(struct context *context, const char *key, const char *val, size_t val_len, struct kv_binding **point);
 extern const char *get_kv_binding_next(const struct kv_binding **next);
 const char *get_kv_binding_first(struct context *context, const char *key, const struct kv_binding **next);
-void free_kv_bindings(struct kv_binding *list);
+void free_kv_bindings(struct kv_binding **list_pp, cond_t maximum_phase);
 
 #endif

@@ -539,6 +539,7 @@ int insert_kv_binding(struct context *context, const char *key, const char *val,
 	  point = &local_point;
 	new_kv->key = key;
 	new_kv->val_len = val_len;
+	new_kv->capture_phase = context->current_phase;
 	memcpy(new_kv->val, val, val_len);
 	new_kv->val[val_len] = 0;
 	if (! *point) {
@@ -589,11 +590,22 @@ const char *get_kv_binding_first(struct context *context, const char *key, const
 	return 0;
 }
 
-void free_kv_bindings(struct kv_binding *list) {
+void free_kv_bindings(struct kv_binding **list_pp, cond_t keep_if_before) {
+	struct kv_binding *list = *list_pp;
 	while (list) {
-		struct kv_binding *next = list->next;
-		free(list);
-		list = next;
+		if (list->capture_phase < keep_if_before)
+			list = list->next;
+		else {
+			struct kv_binding *prev = list->prev, *next = list->next;
+			free(list);
+			if (prev)
+				prev->next = next;
+			else
+				*list_pp = next;
+			if (next)
+				next->prev = prev;
+			list = next;
+		}
 	}
 }
 

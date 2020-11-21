@@ -667,14 +667,14 @@ static void release_ruleset(struct ruleset *rs) {
 }
 
 static struct action *
-check_macros(SMFICTX *ctx, struct context *context, cond_t phase)
+check_macros(SMFICTX *ctx, struct context *context)
 {
 	struct action *action;
 	int i;
 	const char *v;
 
 	for (i = 0; macro[i].phase != COND_NONE; ++i) {
-		if (macro[i].phase != phase)
+		if (macro[i].phase != context->current_phase)
 			continue;
 		v = smfi_getsymval(ctx, (char *)macro[i].name); /* may be null.  allow testing for that. */
 		if (debug)
@@ -749,6 +749,8 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 		return (SMFIS_ACCEPT);
 	}
 
+	context->current_phase = COND_CONNECT;
+
 	{
 		const char *j_name = smfi_getsymval(ctx, (char *)"j");
 		if (j_name)
@@ -805,7 +807,7 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 	msg(LOG_DEBUG, context, "cb_connect('%s', '%s')",
 	    context->host_name, context->host_addr);
 
-	if ((action = check_macros(ctx, context, COND_CONNECT)) != NULL)
+	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action,
 					strlcpy(context->end_eval_note, "CONNECT-M", sizeof context->end_eval_note));
 	eval_clear(context, COND_CONNECT);
@@ -849,6 +851,8 @@ cb_helo(SMFICTX *ctx, char *arg)
 		return (SMFIS_ACCEPT);
 	}
 
+	context->current_phase = COND_HELO;
+
 	{
 		const char *TLS_verify = smfi_getsymval(ctx, (char *)"{verify}");
 		if (TLS_verify) {
@@ -871,7 +875,7 @@ cb_helo(SMFICTX *ctx, char *arg)
 
 	/* multiple HELO imply RSET in sendmail */
 
-	if ((action = check_macros(ctx, context, COND_HELO)) != NULL)
+	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action,
 					strlcpy(context->end_eval_note, "HELO-M", sizeof context->end_eval_note));
 	eval_clear(context, COND_HELO);
@@ -900,6 +904,11 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		msg(LOG_ERR, NULL, "cb_envfrom: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
+	context->current_phase = COND_ENVFROM;
+
+	/* delete any message-specific bindings left over from previous message. */
+	free_kv_bindings(&context->captures, COND_ENVFROM);
 
 	/* first opportunity to read the Message-ID and auth_authen */
 	{
@@ -951,7 +960,7 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	    COND_MACRO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 
-	if ((action = check_macros(ctx, context, COND_ENVFROM)) != NULL)
+	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action,
 					strlcpy(context->end_eval_note, "ENVFROM-M", sizeof context->end_eval_note));
 
@@ -973,6 +982,8 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 		msg(LOG_ERR, NULL, "cb_envrcpt: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
+	context->current_phase = COND_ENVRCPT;
 
 	if (*args != NULL) {
 		if (context->env_rcpt[0])
@@ -1000,7 +1011,7 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 	    COND_MACRO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 
-	if ((action = check_macros(ctx, context, COND_ENVRCPT)) != NULL)
+	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action,
 					strlcpy(context->end_eval_note, "ENVRCPT-M", sizeof context->end_eval_note));
 
@@ -1030,6 +1041,8 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 		msg(LOG_ERR, context, "cb_header: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
+	context->current_phase = COND_HEADER;
 
 #ifdef USE_GMIME
 	void cleanup_free(char **p) {
@@ -1141,12 +1154,14 @@ cb_eoh(SMFICTX *ctx)
 		return (SMFIS_ACCEPT);
 	}
 
+	context->current_phase = COND_HEADER;
+
 	msg(LOG_DEBUG, context, "cb_eoh()");
 
 	if (context->action)
 		return SMFIS_CONTINUE;
 
-	if ((action = check_macros(ctx, context, COND_HEADER)) != NULL)
+	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
 					strlcpy(context->end_eval_note, "EOH-M1", sizeof context->end_eval_note));
 
@@ -1184,6 +1199,8 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 		msg(LOG_ERR, NULL, "cb_body: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
+	context->current_phase = COND_BODY;
 
 	if (context->action) {
 		if (context->smfi_phases & SMFIP_SKIP)
@@ -1347,7 +1364,7 @@ cb_close(SMFICTX *ctx)
 		}
 		geoip2_free_summary(context);
 #endif
-		free_kv_bindings(context->captures);
+		free_kv_bindings(&context->captures, COND_NONE);
 		release_ruleset(context->rs);
 		free(context);
 	}
