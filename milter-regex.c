@@ -1240,10 +1240,13 @@ cb_eom(SMFICTX *ctx)
 			strlcpy(context->end_eval_note, "EOM", sizeof context->end_eval_note);
 			(void)setreply(ctx, context, COND_BODY, action);
 		}
+	}
 
-		if ((action = eval_end(context, COND_COMPARE_CAPTURES, COND_MAX)) != NULL)
-			SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_HEADER, action,
-						strlcpy(context->end_eval_note, "EOM-Captures", sizeof context->end_eval_note));
+	if (! context->action) {
+		if ((action = eval_end(context, COND_COMPARE_CAPTURES, COND_MAX)) != NULL) {
+			strlcpy(context->end_eval_note, "EOM-Captures", sizeof context->end_eval_note);
+			(void)setreply(ctx, context, COND_COMPARE_CAPTURES, action);
+		}
 	}
 
 	sfsistat result;
