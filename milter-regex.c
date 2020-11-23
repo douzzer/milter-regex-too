@@ -1227,9 +1227,12 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 			context->pos = 0;
 			if (debug)
 				msg(LOG_DEBUG, context, "cb_body('%s')", context->buf);
-			if ((action = eval_cond(context,
-			    COND_BODY, context->buf, NULL)) != NULL)
+			if ((action = eval_cond(context, COND_BODY, context->buf, NULL)) != NULL)
 				SETREPLY_RETURN_IF_DONE(ctx, context, COND_BODY, action);
+			if ((action = eval_cond(context, COND_CAPTURE_ONCE_BODY, context->buf, NULL)))
+				SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ONCE_BODY, action);
+			if ((action = eval_cond(context, COND_CAPTURE_ALL_BODY, context->buf, NULL)))
+				SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ALL_BODY, action);
 		} else
 			context->pos++;
 	}

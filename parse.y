@@ -82,9 +82,11 @@ typedef struct {
 %token	ERROR STRING
 %token	ACCEPT WHITELIST REJECT TEMPFAIL DISCARD QUARANTINE META
 %token	CONNECT HELO ENVFROM ENVRCPT HEADER MACRO BODY PHASEDONE
-%token	CAPTURE_ONCE_HEADER CAPTURE_ALL_HEADER CAPTURE_MACRO
+%token	CAPTURE_ONCE_HEADER CAPTURE_ALL_HEADER
+%token	CAPTURE_ONCE_BODY CAPTURE_ALL_BODY CAPTURE_MACRO
 %token	COMPARE_HEADER COMPARE_CAPTURES
-%token	CONNECTGEO HEADERGEO CAPTURE_ONCE_HEADER_GEO CAPTURE_ALL_HEADER_GEO CAPTURE_MACRO_GEO
+%token	CONNECTGEO HEADERGEO CAPTURE_ONCE_BODY_GEO CAPTURE_ALL_BODY_GEO
+%token	CAPTURE_ONCE_HEADER_GEO CAPTURE_ALL_HEADER_GEO CAPTURE_MACRO_GEO
 %token	AND OR NOT
 %type	<v.string>	STRING
 %type	<v.expr>	expr term
@@ -151,6 +153,40 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 		free($3);
 		free($4);
 		free($5);
+#else
+		YYERROR;
+#endif
+	}
+	| CAPTURE_ONCE_BODY STRING STRING	{
+		if (! create_capture(rs, COND_CAPTURE_ONCE_BODY, $2, $3, NULL, NULL, yylval.lineno))
+			YYERROR;
+		free($2);
+		free($3);
+	}
+	| CAPTURE_ALL_BODY STRING STRING	{
+		if (! create_capture(rs, COND_CAPTURE_ALL_BODY, $2, $3, NULL, NULL, yylval.lineno))
+			YYERROR;
+		free($2);
+		free($3);
+	}
+	| CAPTURE_ONCE_BODY_GEO STRING STRING STRING	{
+#ifdef GEOIP2
+		if (! create_capture(rs, COND_CAPTURE_ONCE_BODY_GEO, $2, $3, $4, NULL, yylval.lineno))
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
+#else
+		YYERROR;
+#endif
+	}
+	| CAPTURE_ALL_BODY_GEO STRING STRING STRING	{
+#ifdef GEOIP2
+		if (! create_capture(rs, COND_CAPTURE_ALL_BODY_GEO, $2, $3, $4, NULL, yylval.lineno))
+			YYERROR;
+		free($2);
+		free($3);
+		free($4);
 #else
 		YYERROR;
 #endif
@@ -410,6 +446,10 @@ static const struct keywords keywords[] = {
 	{ "accept",	ACCEPT,		K_TYPE_ACTION,	ACTION_ACCEPT },
 	{ "and",	AND,		K_TYPE_EXPR,	EXPR_AND },
 	{ "body",	BODY,		K_TYPE_COND,	COND_BODY },
+	{ "capture_all_body",	CAPTURE_ALL_BODY,		K_TYPE_COND,	COND_CAPTURE_ALL_BODY },
+#ifdef GEOIP2
+	{ "capture_all_body_geo",	CAPTURE_ALL_BODY_GEO,	K_TYPE_COND,	COND_CAPTURE_ALL_BODY_GEO },
+#endif
 	{ "capture_all_header",	CAPTURE_ALL_HEADER,		K_TYPE_COND,	COND_CAPTURE_ALL_HEADER },
 #ifdef GEOIP2
 	{ "capture_all_header_geo",	CAPTURE_ALL_HEADER_GEO,	K_TYPE_COND,	COND_CAPTURE_ALL_HEADER_GEO },
@@ -417,6 +457,10 @@ static const struct keywords keywords[] = {
 	{ "capture_macro",	CAPTURE_MACRO,		K_TYPE_COND,	COND_CAPTURE_MACRO },
 #ifdef GEOIP2
 	{ "capture_macro_geo",	CAPTURE_MACRO_GEO,	K_TYPE_COND,	COND_CAPTURE_MACRO_GEO },
+#endif
+	{ "capture_once_body",	CAPTURE_ONCE_BODY,		K_TYPE_COND,	COND_CAPTURE_ONCE_BODY },
+#ifdef GEOIP2
+	{ "capture_once_body_geo",	CAPTURE_ONCE_BODY_GEO,	K_TYPE_COND,	COND_CAPTURE_ONCE_BODY_GEO },
 #endif
 	{ "capture_once_header",	CAPTURE_ONCE_HEADER,		K_TYPE_COND,	COND_CAPTURE_ONCE_HEADER },
 #ifdef GEOIP2

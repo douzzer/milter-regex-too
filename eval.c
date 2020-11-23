@@ -164,6 +164,17 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 					goto error;
 			} else {
 #endif
+				if (((type == COND_CAPTURE_ONCE_BODY) ||
+				     (type == COND_CAPTURE_ALL_BODY)
+#ifdef GEOIP2
+				     || (type == COND_CAPTURE_ONCE_BODY_GEO) ||
+				     (type == COND_CAPTURE_ALL_BODY_GEO)
+#endif
+					    ) && cond->args[0].not) {
+					yyerror("create_cond_4: 1st arg (capture arg) must not be negated");
+					goto error;
+				}
+
 				if (build_regex(&cond->args[0]))
 					goto error;
 #ifdef GEOIP2
@@ -174,8 +185,21 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 			cond->args[1].src = strdup(b);
 			if (cond->args[1].src == NULL)
 				goto error;
-			if (build_regex(&cond->args[1]))
-				goto error;
+			if ((type == COND_CAPTURE_ONCE_BODY) ||
+			    (type == COND_CAPTURE_ALL_BODY)) {
+				/* nothing to prepare */
+			}
+#ifdef GEOIP2
+			else if ((type == COND_CAPTURE_ONCE_BODY_GEO) ||
+				 (type == COND_CAPTURE_ALL_BODY_GEO)) {
+				if (build_geoip2_path(&cond->args[1]))
+					goto error;
+			}
+#endif
+			else {
+				if (build_regex(&cond->args[1]))
+					goto error;
+			}
 #ifdef GEOIP2
 			if ((type == COND_HEADERGEO) &&
 			    (cond->args[1].not || cond->args[1].empty)) {
@@ -209,7 +233,12 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 			    (type == COND_CAPTURE_ALL_HEADER) ||
 			    (type == COND_CAPTURE_MACRO) ||
 			    (type == COND_COMPARE_HEADER) ||
-			    (type == COND_COMPARE_CAPTURES)) {
+			    (type == COND_COMPARE_CAPTURES)
+#ifdef GEOIP2
+			    || (type == COND_CAPTURE_ONCE_BODY_GEO) ||
+			    (type == COND_CAPTURE_ALL_BODY_GEO)
+#endif
+				) {
 				/* nothing to prepare. */
 			} else
 #ifdef GEOIP2
@@ -414,6 +443,7 @@ eval_cond_1(struct context *context, int type,
 	struct cond_list *cl;
 	struct action_list *al;
 
+	int n_pushed = 0;
 	int initial_captures_change_count = context->captures_change_count;
 
 again:
@@ -425,14 +455,19 @@ again:
 		r = check_cond(context, cl->cond, a, b);
 		if (r < 0)
 			return (NULL);
-		else if (!r)
+		else if (!r) {
 			push_cond_result(cl->cond, VAL_TRUE, res);
+			++n_pushed;
+		}
 	}
-	for (al = rs->action; al != NULL; al = al->next) {
-		if (al->action->type == ACTION_META)
-			continue;
-		if (res[al->action->idx] == VAL_TRUE)
-			return (al->action);
+
+	if (n_pushed > 0) {
+		for (al = rs->action; al != NULL; al = al->next) {
+			if (al->action->type == ACTION_META)
+				continue;
+			if (res[al->action->idx] == VAL_TRUE)
+				return (al->action);
+		}
 	}
 
 	if ((type != COND_COMPARE_CAPTURES) &&
@@ -476,23 +511,32 @@ eval_end(struct context *context, int type, __attribute__((unused)) int max)
 	struct cond_list *cl;
 	struct action_list *al;
 
+	int n_pushed = 0;
+
 	eval_mutex_lock();
 
 	context->last_phase_done = type;
 
-	for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
-		if (res[cl->cond->idx] == VAL_UNDEF)
+	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
+		if (res[cl->cond->idx] == VAL_UNDEF) {
 			push_cond_result(cl->cond, VAL_FALSE, res);
-	for (al = rs->action; al != NULL; al = al->next) {
-		if (al->action->type == ACTION_META)
-			continue;
-		if (res[al->action->idx] == VAL_TRUE) {
-			eval_mutex_unlock();
-			if (debug)
-				context->eval_time_cum += now_usecs() - start_at;
-			return (al->action);
+			++n_pushed;
 		}
 	}
+
+	if (n_pushed > 0) {
+		for (al = rs->action; al != NULL; al = al->next) {
+			if (al->action->type == ACTION_META)
+				continue;
+			if (res[al->action->idx] == VAL_TRUE) {
+				eval_mutex_unlock();
+				if (debug)
+					context->eval_time_cum += now_usecs() - start_at;
+				return (al->action);
+			}
+		}
+	}
+
 #if 0
 	for (type = max; type < COND_MAX; ++type) {
 		if (type == COND_PHASEDONE)
@@ -806,7 +850,73 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 #ifdef GEOIP2
 	case COND_CAPTURE_ONCE_HEADER_GEO:
 	case COND_CAPTURE_ALL_HEADER_GEO: {
-		/* capture_header_geo <header_LHS_match_re> <header_RHS_selector_re> <geo_ip_path> <varname> */
+		/* capture_{once,all}_header_geo <header_LHS_match_re> <header_RHS_selector_re> <geo_ip_path> <varname> */
+
+		return -1;
+	}
+#endif
+
+	case COND_CAPTURE_ONCE_BODY:
+	case COND_CAPTURE_ALL_BODY: {
+		/* capture_{once,all}_body <body_selector_re> <varname> */
+
+		if (! a)
+			return -1;
+
+		ssize_t a_len_left = (ssize_t)strlen(a);
+
+		if (c->args[0].empty) {
+			insert_kv_binding(context, c->args[1].src, a, a_len_left, 0);
+			return c->type == COND_CAPTURE_ALL_BODY; /* return false to arrange for calls on every header regardless of earlier match. */
+		}
+
+		const char *a_ptr = a;
+		regmatch_t matches[8];
+		struct kv_binding *point = 0;
+		int n_inserted = 0;
+
+		while (a_len_left > 0) {
+			int r = regexec(&c->args[0].re, a_ptr, sizeof matches / sizeof matches[0], matches, (a_ptr != a) ? REG_NOTBOL : 0);
+			if (r) {
+				if (r != REG_NOMATCH)
+					return -1;
+				else
+					break;
+			}
+
+			for (int i=1;;) {
+				if (matches[i].rm_so != -1) {
+					insert_kv_binding(context, c->args[1].src, a + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+					++n_inserted;
+				}
+				if (i == 0)
+					break;
+				++i;
+				if (i == (int)(sizeof matches / sizeof matches[0])) {
+					if (! n_inserted)
+						i = 0;
+					else
+						break;
+				}
+			}
+
+			if (! c->args[0].global)
+			  break;
+
+			a_len_left -= matches[0].rm_eo;
+			a_ptr += matches[0].rm_eo;
+		}
+
+		if (c->type == COND_CAPTURE_ALL_BODY)
+			return 1; /* return false to arrange for calls on every header regardless of earlier match. */
+		else
+			return (n_inserted > 0) ? 0 : 1;
+	}
+
+#ifdef GEOIP2
+	case COND_CAPTURE_ONCE_BODY_GEO:
+	case COND_CAPTURE_ALL_BODY_GEO: {
+		/* capture_{once,all}_body_geo <body_selector_re> <geo_ip_path> <varname> */
 
 		return -1;
 	}
