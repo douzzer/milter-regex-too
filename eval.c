@@ -241,7 +241,8 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 			{
 				if (build_regex(&cond->args[3]))
 					goto error;
-				if ((type == COND_COMPARE_CAPTURES) &&
+				if (((type == COND_COMPARE_HEADER) ||
+				     (type == COND_COMPARE_CAPTURES)) &&
 				    cond->args[3].not) {
 				  yyerror("create_cond_4: 4th arg (capture arg) must not be negated");
 				  goto error;
@@ -739,7 +740,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 	case COND_CAPTURE_ONCE_HEADER:
 	case COND_CAPTURE_ALL_HEADER: {
-		/* capture_header <header_LHS_match_re> <header_RHS_selector_re> <varname> */
+		/* capture_{once,all}_header <header_LHS_match_re> <header_RHS_selector_re> <varname> */
 
 		if ((! a) || (! b))
 			return -1;
@@ -828,8 +829,8 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		ssize_t b_len_left = (ssize_t)strlen(b);
 
 		if (c->args[1].empty) {
-		  insert_kv_binding(context, c->args[2].src, b, b_len_left, 0);
-		  return 0;
+			insert_kv_binding(context, c->args[2].src, b, b_len_left, 0);
+			return 0;
 		}
 
 		const char *b_ptr = b;
@@ -880,13 +881,12 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	}
 #endif
 
-	case COND_COMPARE_HEADER: {
-		/* <header_LHS_match_re> <header_RHS_selector_re> [!]<connect:host|connect:addr|helo|envfrom|envrcpt|var:name> [macro_RHS_selector_re] */
-	  return -1;
-	}
-
+	case COND_COMPARE_HEADER:
 	case COND_COMPARE_CAPTURES: {
+		/* compare_header <header_LHS_match_re> <header_RHS_selector_re> [!]<connect:host|connect:addr|helo|envfrom|envrcpt|var:name> [macro_RHS_selector_re] */
+
 		/* compare_captures <connect:host|connect:addr|helo|envfrom|envrcpt|var:name> <value_selector_re1> <connect:host|connect:addr|helo|envfrom|envrcpt|var:name> <value_selector_re2> */
+
 		/* (cond->args[1].src and [3].src can safely be null, though that's not currently used.) */
 
 		/* test passes if any of vals for the first key equal any of the vals for the second. */
@@ -902,12 +902,29 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		 */
 
 		const struct kv_binding *first_operand_i, *second_operand_i;
-		const char *first_operand_preselection = get_kv_binding_first(context, c->args[0].src, &first_operand_i);
+		const char *first_operand_preselection;
 		size_t first_operand_preselection_len = 0;
-		if (! first_operand_preselection) {
-		  if (get_envelope_member(context, c->args[0].src, &first_operand_preselection, &first_operand_preselection_len) < 0)
-		    break;
-		  first_operand_i = 0;
+
+		if (c->type == COND_COMPARE_HEADER) {
+			if ((! a) || (! b))
+				return -1;
+			if (! c->args[0].empty) {
+				int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+				if (r && r != REG_NOMATCH)
+					return -1;
+				if ((r == REG_NOMATCH) != c->args[0].not)
+					return 1;
+			}
+			first_operand_preselection = b;
+			first_operand_i = 0;
+		} else {
+			first_operand_preselection = get_kv_binding_first(context, c->args[0].src, &first_operand_i);
+
+			if (! first_operand_preselection) {
+				if (get_envelope_member(context, c->args[0].src, &first_operand_preselection, &first_operand_preselection_len) < 0)
+					break;
+				first_operand_i = 0;
+			}
 		}
 
 		const char *second_operand_preselection = get_kv_binding_first(context, c->args[2].src, &second_operand_i);

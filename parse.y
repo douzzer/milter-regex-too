@@ -276,13 +276,14 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 		free($4);
 		free($5);
 	}
-	| COMPARE_HEADER STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_COMPARE_HEADER, $2, $3, $4, NULL);
+	| COMPARE_HEADER STRING STRING STRING STRING	{
+		$$ = create_cond_4(rs, COND_COMPARE_HEADER, $2, $3, $4, $5);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 		free($3);
 		free($4);
+		free($5);
 	}
 	| CONNECT STRING STRING	{
 		$$ = create_cond(rs, COND_CONNECT, $2, $3);
