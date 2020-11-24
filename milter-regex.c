@@ -1079,8 +1079,9 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	if (rawvalue) {
 		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, rawvalue);
 		msg(LOG_DEBUG, context, "DECODED cb_header('%s', '%s')", name, value);
-	} else {
+	} else
 #endif
+	{
 		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
 	}
 
