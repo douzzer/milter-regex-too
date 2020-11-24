@@ -456,9 +456,6 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 {
 	sfsistat result = SMFIS_CONTINUE;
 
-	if (action->type == ACTION_META)
-		return SMFIS_CONTINUE;
-
 	context->action = action;
 	context->last_phase_done = phase;
 	if (debug) {
@@ -476,8 +473,6 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 		break;
 	case ACTION_QUARANTINE:
 		/* result stays SMFIS_CONTINUE */
-	case ACTION_META: /* to shush -Wswitch */
-		break;
 	case ACTION_DISCARD:
 		result = SMFIS_DISCARD;
 		break;
@@ -677,8 +672,7 @@ check_macros(SMFICTX *ctx, struct context *context)
 		if (macro[i].phase != context->current_phase)
 			continue;
 		v = smfi_getsymval(ctx, (char *)macro[i].name); /* may be null.  allow testing for that. */
-		if (debug)
-			msg(LOG_DEBUG, context, "macro %s = %s", macro[i].name, v ? v : "<unset>");
+		msg(LOG_DEBUG, context, "macro %s = %s", macro[i].name, v ? v : "<unset>");
 		if ((action = eval_cond(context, COND_MACRO,
 		    macro[i].name, v)) != NULL)
 			return (action);
@@ -770,7 +764,10 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 		return (SMFIS_ACCEPT);
 	}
 	context->res = calloc(context->rs->maxidx, sizeof(*context->res));
-	if (context->res == NULL) {
+	context->res_phase = calloc(context->rs->maxidx, sizeof(*context->res));
+	if ((context->res == NULL) || (context->res_phase == NULL)) {
+		if (context->res)
+			free(context->res);
 		free(context);
 		smfi_setpriv(ctx, NULL);
 		msg(LOG_ERR, NULL, "cb_connect: calloc: %s", strerror(errno));
@@ -815,18 +812,15 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 				context->host_name, context->host_addr)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
 
-	if ((action = eval_end(context, COND_CONNECT,
-	    COND_MACRO)) !=
+	if ((action = eval_end(context, COND_CONNECT)) !=
 	    NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
 
 #ifdef GEOIP2
-	eval_clear(context, COND_CONNECTGEO);
 	if ((action = eval_cond(context, COND_CONNECTGEO,
 				context->host_addr, NULL)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECTGEO, action);
-	if ((action = eval_end(context, COND_CONNECTGEO,
-			       COND_MACRO)) != NULL)
+	if ((action = eval_end(context, COND_CONNECTGEO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECTGEO, action);
 #endif
 
@@ -875,15 +869,14 @@ cb_helo(SMFICTX *ctx, char *arg)
 
 	/* multiple HELO imply RSET in sendmail */
 
+	eval_clear(context, COND_HELO);
 	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action,
 					strlcpy(context->end_eval_note, "HELO-M", sizeof context->end_eval_note));
-	eval_clear(context, COND_HELO);
 	if ((action = eval_cond(context, COND_HELO,
 	    arg, NULL)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
-	if ((action = eval_end(context, COND_HELO,
-	    COND_MACRO)) != NULL)
+	if ((action = eval_end(context, COND_HELO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
 
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
@@ -906,9 +899,6 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	}
 
 	context->current_phase = COND_ENVFROM;
-
-	/* delete any message-specific bindings left over from previous message. */
-	free_kv_bindings(&context->captures, COND_ENVFROM);
 
 	/* first opportunity to read the Message-ID and auth_authen */
 	{
@@ -942,7 +932,7 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		context->action = 0;
 	}
 
-	if (debug && *args)
+	if (*args)
 		msg(LOG_DEBUG, context, "cb_envfrom('%s')", *args);
 
 	if (context->action)
@@ -956,8 +946,7 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		    *args, NULL)) != NULL)
 			SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 	}
-	if ((action = eval_end(context, COND_ENVFROM,
-	    COND_MACRO)) != NULL)
+	if ((action = eval_end(context, COND_ENVFROM)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 
 	if ((action = check_macros(ctx, context)) != NULL)
@@ -992,7 +981,7 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 		strlcat(context->env_rcpt, *args, sizeof(context->env_rcpt));
 	}
 
-	if (debug && *args)
+	if (*args)
 		msg(LOG_DEBUG, context, "cb_envrcpt('%s')", *args);
 
 	if (context->action)
@@ -1007,8 +996,7 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 		    *args, NULL)) != NULL)
 			SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 	}
-	if ((action = eval_end(context, COND_ENVRCPT,
-	    COND_MACRO)) != NULL)
+	if ((action = eval_end(context, COND_ENVRCPT)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 
 	if ((action = check_macros(ctx, context)) != NULL)
@@ -1087,14 +1075,13 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 		saved_a_header = 1;
 	}
 
-	if (debug) {
 #ifdef USE_GMIME
-	  if (rawvalue) {
-	    msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, rawvalue);
-	    msg(LOG_DEBUG, context, "DECODED cb_header('%s', '%s')", name, value);
-	  } else
+	if (rawvalue) {
+		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, rawvalue);
+		msg(LOG_DEBUG, context, "DECODED cb_header('%s', '%s')", name, value);
+	} else {
 #endif
-	    msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
+		msg(LOG_DEBUG, context, "cb_header('%s', '%s')", name, value);
 	}
 
 	if (context->action)
@@ -1154,8 +1141,7 @@ cb_eoh(SMFICTX *ctx)
 		return (SMFIS_ACCEPT);
 	}
 
-	context->current_phase = COND_HEADER;
-
+	context->current_phase = COND_EOH;
 	msg(LOG_DEBUG, context, "cb_eoh()");
 
 	if (context->action)
@@ -1170,19 +1156,19 @@ cb_eoh(SMFICTX *ctx)
 	    NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action, strlcpy(context->end_eval_note, "EOH-Captures", sizeof context->end_eval_note));
 
-	if ((action = eval_end(context, COND_MACRO, COND_HEADER)) != NULL)
+	if ((action = eval_end(context, COND_MACRO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
 					strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note));
 
 	memset(context->buf, 0, sizeof(context->buf));
 	context->pos = 0;
 
-	if ((action = eval_end(context, COND_HEADER, COND_BODY)) != NULL)
+	if ((action = eval_end(context, COND_HEADER)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
 					strlcpy(context->end_eval_note, "EOH-End", sizeof context->end_eval_note));
 
 #ifdef GEOIP2
-	if ((action = eval_end(context, COND_HEADERGEO, COND_BODY)) != NULL)
+	if ((action = eval_end(context, COND_HEADERGEO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADERGEO, action,
 					strlcpy(context->end_eval_note, "EOH-Geo", sizeof context->end_eval_note));
 #endif
@@ -1225,8 +1211,7 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 			else
 				context->buf[context->pos] = 0;
 			context->pos = 0;
-			if (debug)
-				msg(LOG_DEBUG, context, "cb_body('%s')", context->buf);
+			msg(LOG_DEBUG, context, "cb_body('%s')", context->buf);
 			if ((action = eval_cond(context, COND_BODY, context->buf, NULL)) != NULL)
 				SETREPLY_RETURN_IF_DONE(ctx, context, COND_BODY, action);
 			if ((action = eval_cond(context, COND_CAPTURE_ONCE_BODY, context->buf, NULL)))
@@ -1249,21 +1234,22 @@ cb_eom(SMFICTX *ctx)
 		msg(LOG_ERR, NULL, "cb_eom: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
+	context->current_phase = COND_EOM;
 	msg(LOG_DEBUG, context, "cb_eom()");
 
 	context->message_status = MESSAGE_COMPLETED;
 
 	if (! context->action) {
 		context->body_start_offset = context->body_end_offset;
-		if ((action = eval_end(context, COND_BODY,
-				       COND_MAX)) != NULL) {
+		if ((action = eval_end(context, COND_BODY)) != NULL) {
 			strlcpy(context->end_eval_note, "EOM", sizeof context->end_eval_note);
 			(void)setreply(ctx, context, COND_BODY, action);
 		}
 	}
 
 	if (! context->action) {
-		if ((action = eval_end(context, COND_COMPARE_CAPTURES, COND_MAX)) != NULL) {
+		if ((action = eval_end(context, COND_COMPARE_CAPTURES)) != NULL) {
 			strlcpy(context->end_eval_note, "EOM-Captures", sizeof context->end_eval_note);
 			(void)setreply(ctx, context, COND_COMPARE_CAPTURES, action);
 		}
@@ -1360,6 +1346,7 @@ cb_close(SMFICTX *ctx)
 			setreply_lognotice(context);
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
+		free(context->res_phase);
 #ifdef GEOIP2
 		if (context->geoip2_result_cache) {
 			if (geoip2_cache_release(&context->geoip2_result_cache) < 0)
@@ -1367,7 +1354,7 @@ cb_close(SMFICTX *ctx)
 		}
 		geoip2_free_summary(context);
 #endif
-		free_kv_bindings(&context->captures, COND_NONE);
+		free_kv_bindings(context, &context->captures, COND_NONE);
 		release_ruleset(context->rs);
 		free(context);
 	}
@@ -1395,7 +1382,7 @@ struct smfiDesc smfilter = {
 
 void
 __attribute__((format(printf,3,4)))
-msg(int priority, struct context *context, const char *fmt, ...) 
+msg_1(int priority, struct context *context, const char *fmt, ...)
 {
 	if ((priority == LOG_DEBUG) && (! debug))
 		return;

@@ -54,8 +54,8 @@ static __attribute__((unused)) const char rcsid[] = "$Id: eval.c,v 1.1.1.1 2007/
 
 extern int	 yyerror(const char *, ...);
 static int	 check_cond(struct context *context, struct cond *, const char *, const char *);
-static void	 push_expr_result(struct expr *, int, int *);
-static void	 push_cond_result(struct cond *, int, int *);
+static void	 push_expr_result(struct context *context, struct expr *, int);
+static void	 push_cond_result(struct context *context, struct cond *, int);
 static int	 build_regex(struct cond_arg *);
 #ifdef GEOIP2
 static int	 build_geoip2_path(struct cond_arg *);
@@ -97,6 +97,15 @@ eval_mutex_unlock(void)
 }
 #endif
 
+static const char *lookup_res_name(int resval) {
+	switch(resval) {
+	case VAL_UNDEF: return "UNDEF";
+	case VAL_TRUE: return "TRUE";
+	case VAL_FALSE: return "FALSE";
+	default: return "BAD";
+	}
+}
+
 struct ruleset *
 create_ruleset(void)
 {
@@ -111,7 +120,7 @@ create_ruleset(void)
 }
 
 struct expr *
-create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d)
+create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno)
 {
 	struct cond *cond = NULL;
 	struct cond_list *cl = NULL;
@@ -150,6 +159,7 @@ create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const 
 			goto error;
 
 		cond->type = type;
+		cond->lineno = lineno;
 
 		if (a != NULL) {
 			cond->args[0].src = strdup(a);
@@ -315,15 +325,15 @@ error:
 }
 
 struct expr *
-create_cond(struct ruleset *rs, int type, const char *a, const char *b)
+create_cond(struct ruleset *rs, cond_t type, const char *a, const char *b, int lineno)
 {
-  return create_cond_4(rs, type, a, b, NULL, NULL);
+	return create_cond_4(rs, type, a, b, NULL, NULL, lineno);
 }
 
 struct expr *
-create_capture(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d, int lineno)
+create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno)
 {
-	struct expr *cap_expr = create_cond_4(rs, type, a, b, c, d);
+	struct expr *cap_expr = create_cond_4(rs, type, a, b, c, d, lineno);
 	if (cap_expr == NULL)
 		return NULL;
 
@@ -331,14 +341,6 @@ create_capture(struct ruleset *rs, int type, const char *a, const char *b, const
 		yyerror("yyparse: duplicate capture expression");
 		return NULL;
 	}
-
-	struct action *meta = create_action(rs, ACTION_META, "", lineno);
-	if (meta == NULL) {
-		yyerror("yyparse: create_action");
-		return NULL;
-	}
-
-	cap_expr->action = meta;
 
 	return cap_expr;
 }
@@ -434,7 +436,7 @@ error:
 }
 
 static struct action *
-eval_cond_1(struct context *context, int type,
+eval_cond_1(struct context *context, cond_t type,
     const char *a, const char *b)
 {
 	struct ruleset *rs = context->rs;
@@ -456,15 +458,13 @@ again:
 		if (r < 0)
 			return (NULL);
 		else if (!r) {
-			push_cond_result(cl->cond, VAL_TRUE, res);
+			push_cond_result(context, cl->cond, VAL_TRUE);
 			++n_pushed;
 		}
 	}
 
 	if (n_pushed > 0) {
 		for (al = rs->action; al != NULL; al = al->next) {
-			if (al->action->type == ACTION_META)
-				continue;
 			if (res[al->action->idx] == VAL_TRUE)
 				return (al->action);
 		}
@@ -488,7 +488,7 @@ static long long int now_usecs(void) {
 }
 
 struct action *
-eval_cond(struct context *context, int type,
+eval_cond(struct context *context, cond_t type,
     const char *a, const char *b)
 {
 	long long int start_at = now_usecs();
@@ -501,7 +501,7 @@ eval_cond(struct context *context, int type,
 }
 
 struct action *
-eval_end(struct context *context, int type, __attribute__((unused)) int max)
+eval_end(struct context *context, cond_t type)
 {
 	long long int start_at = now_usecs();
 	struct ruleset *rs = context->rs;
@@ -519,15 +519,13 @@ eval_end(struct context *context, int type, __attribute__((unused)) int max)
 
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
 		if (res[cl->cond->idx] == VAL_UNDEF) {
-			push_cond_result(cl->cond, VAL_FALSE, res);
+			push_cond_result(context, cl->cond, VAL_FALSE);
 			++n_pushed;
 		}
 	}
 
 	if (n_pushed > 0) {
 		for (al = rs->action; al != NULL; al = al->next) {
-			if (al->action->type == ACTION_META)
-				continue;
 			if (res[al->action->idx] == VAL_TRUE) {
 				eval_mutex_unlock();
 				if (debug)
@@ -556,20 +554,45 @@ eval_end(struct context *context, int type, __attribute__((unused)) int max)
 }
 
 void
-eval_clear(struct context *context, int type)
+eval_clear(struct context *context, cond_t type)
 {
 	long long int start_at = now_usecs();
 	struct ruleset *rs = context->rs;
-	int *res = context->res;
 
 	struct cond_list *cl;
 
 	eval_mutex_lock();
-	for (; type < COND_MAX; ++type)
+
+#if 0
+	for (; type < COND_MAX; ++type) {
 		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
-			push_cond_result(cl->cond, VAL_UNDEF, res);
-	for (struct action_list *al = rs->action; al != NULL; al = al->next)
-		res[al->action->idx] = VAL_UNDEF;
+			push_cond_result(context, cl->cond, VAL_UNDEF);
+#endif
+
+	for (int type_i = COND_NONE + 1; type_i < COND_MAX; ++type_i) {
+		for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
+			if ((context->res_phase[cl->cond->idx] != COND_NONE) &&
+			    (context->res_phase[cl->cond->idx] >= type))
+				push_cond_result(context, cl->cond, VAL_UNDEF);
+		}
+	}
+
+	for (struct action_list *al = rs->action; al != NULL; al = al->next) {
+		if (context->res[al->action->idx] != VAL_UNDEF) {
+			msg(LOG_DEBUG, context,
+			    "cleared action %s @L%d %s@%s -> %s@%s",
+			    lookup_action_name(al->action->type),
+			    al->action->lineno,
+			    lookup_res_name(context->res[al->action->idx]),
+			    lookup_cond_name(context->res_phase[al->action->idx]),
+			    lookup_res_name(VAL_UNDEF),
+			    lookup_cond_name(context->current_phase));
+			context->res[al->action->idx] = VAL_UNDEF;
+		}
+	}
+
+	free_kv_bindings(context, &context->captures, type);
+
 	eval_mutex_unlock();
 	if (debug)
 		context->eval_time_cum += now_usecs() - start_at;
@@ -635,13 +658,16 @@ const char *get_kv_binding_first(struct context *context, const char *key, const
 	return 0;
 }
 
-void free_kv_bindings(struct kv_binding **list_pp, cond_t keep_if_before) {
+void free_kv_bindings(struct context *context, struct kv_binding **list_pp, cond_t keep_if_before) {
 	struct kv_binding *list = *list_pp;
 	while (list) {
 		if (list->capture_phase < keep_if_before)
 			list = list->next;
 		else {
 			struct kv_binding *prev = list->prev, *next = list->next;
+
+			msg(LOG_DEBUG, context, "deleting KV \"%s\" = \"%.*s\"", list->key, (int)list->val_len, list->val);
+
 			free(list);
 			if (prev)
 				prev->next = next;
@@ -1427,15 +1453,18 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 }
 
 static void
-push_expr_result(struct expr *e, int val, int *res)
+push_expr_result(struct context *context, struct expr *e, int val)
 {
 	struct expr_list *el;
+	int *res = context->res;
 
 	if (res[e->idx] == val)
 		return;
 	res[e->idx] = val;
-	if (e->action != NULL && val == VAL_TRUE)
+	if (e->action != NULL && val == VAL_TRUE) {
 		res[e->action->idx] = val;
+		context->res_phase[e->action->idx] = context->current_phase;
+	}
 	for (el = e->expr; el != NULL; el = el->next) {
 		struct expr *p = el->expr;
 
@@ -1443,30 +1472,30 @@ push_expr_result(struct expr *e, int val, int *res)
 		case EXPR_AND:
 			if (res[p->args[0]->idx] == VAL_TRUE &&
 			    res[p->args[1]->idx] == VAL_TRUE)
-				push_expr_result(p, VAL_TRUE, res);
+				push_expr_result(context, p, VAL_TRUE);
 			else if (res[p->args[0]->idx] == VAL_FALSE ||
 			    res[p->args[1]->idx] == VAL_FALSE)
-				push_expr_result(p, VAL_FALSE, res);
+				push_expr_result(context, p, VAL_FALSE);
 			else
-				push_expr_result(p, VAL_UNDEF, res);
+				push_expr_result(context, p, VAL_UNDEF);
 			break;
 		case EXPR_OR:
 			if (res[p->args[0]->idx] == VAL_TRUE ||
 			    res[p->args[1]->idx] == VAL_TRUE)
-				push_expr_result(p, VAL_TRUE, res);
+				push_expr_result(context, p, VAL_TRUE);
 			else if (res[p->args[0]->idx] == VAL_FALSE &&
 			    res[p->args[1]->idx] == VAL_FALSE)
-				push_expr_result(p, VAL_FALSE, res);
+				push_expr_result(context, p, VAL_FALSE);
 			else
-				push_expr_result(p, VAL_UNDEF, res);
+				push_expr_result(context, p, VAL_UNDEF);
 			break;
 		case EXPR_NOT:
 			if (val == VAL_TRUE)
-				push_expr_result(p, VAL_FALSE, res);
+				push_expr_result(context, p, VAL_FALSE);
 			else if (val == VAL_FALSE)
-				push_expr_result(p, VAL_TRUE, res);
+				push_expr_result(context, p, VAL_TRUE);
 			else
-				push_expr_result(p, VAL_UNDEF, res);
+				push_expr_result(context, p, VAL_UNDEF);
 			break;
 		default:
 			break;
@@ -1475,19 +1504,32 @@ push_expr_result(struct expr *e, int val, int *res)
 }
 
 static void
-push_cond_result(struct cond *c, int val, int *res)
+push_cond_result(struct context *context, struct cond *c, int val)
 {
 	struct expr_list *el;
 
-	if (res[c->idx] == val)
+	if (context->res[c->idx] == val)
 		return;
-	res[c->idx] = val;
+
+	msg(LOG_DEBUG, context,
+	    "pushed result %s \"%s\"... @L%d %s@%s -> %s@%s",
+	    lookup_cond_name(c->type),
+	    c->args[0].src,
+	    c->lineno,
+	    lookup_res_name(context->res[c->idx]),
+	    lookup_cond_name(context->res_phase[c->idx]),
+	    lookup_res_name(val),
+	    lookup_cond_name(context->current_phase));
+
+	context->res[c->idx] = val;
+	context->res_phase[c->idx] = context->current_phase;
+
 	for (el = c->expr; el != NULL; el = el->next) {
 		struct expr *e = el->expr;
 
 		if (e->type != EXPR_COND)
 			continue;
-		push_expr_result(e, val, res);
+		push_expr_result(context, e, val);
 	}
 }
 

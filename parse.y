@@ -80,7 +80,7 @@ typedef struct {
 %expect 4
 
 %token	ERROR STRING
-%token	ACCEPT WHITELIST REJECT TEMPFAIL DISCARD QUARANTINE META
+%token	ACCEPT WHITELIST REJECT TEMPFAIL DISCARD QUARANTINE
 %token	CONNECT HELO ENVFROM ENVRCPT HEADER MACRO BODY PHASEDONE
 %token	CAPTURE_ONCE_HEADER CAPTURE_ALL_HEADER
 %token	CAPTURE_ONCE_BODY CAPTURE_ALL_BODY CAPTURE_MACRO
@@ -304,7 +304,7 @@ expr	: term			{
 	;
 
 term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_COMPARE_CAPTURES, $2, $3, $4, $5);
+		$$ = create_cond_4(rs, COND_COMPARE_CAPTURES, $2, $3, $4, $5, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -313,7 +313,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 		free($5);
 	}
 	| COMPARE_HEADER STRING STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_COMPARE_HEADER, $2, $3, $4, $5);
+		$$ = create_cond_4(rs, COND_COMPARE_HEADER, $2, $3, $4, $5, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -322,7 +322,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 		free($5);
 	}
 	| CONNECT STRING STRING	{
-		$$ = create_cond(rs, COND_CONNECT, $2, $3);
+		$$ = create_cond(rs, COND_CONNECT, $2, $3, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -330,7 +330,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 	}
 	| CONNECTGEO STRING STRING	{
 #ifdef GEOIP2
-		$$ = create_cond(rs, COND_CONNECTGEO, $2, $3);
+		$$ = create_cond(rs, COND_CONNECTGEO, $2, $3, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -340,25 +340,25 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 #endif
 	}
 	| HELO STRING		{
-		$$ = create_cond(rs, COND_HELO, $2, NULL);
+		$$ = create_cond(rs, COND_HELO, $2, NULL, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| ENVFROM STRING	{
-		$$ = create_cond(rs, COND_ENVFROM, $2, NULL);
+		$$ = create_cond(rs, COND_ENVFROM, $2, NULL, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| ENVRCPT STRING	{
-		$$ = create_cond(rs, COND_ENVRCPT, $2, NULL);
+		$$ = create_cond(rs, COND_ENVRCPT, $2, NULL, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| HEADER STRING STRING	{
-		$$ = create_cond(rs, COND_HEADER, $2, $3);
+		$$ = create_cond(rs, COND_HEADER, $2, $3, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -366,7 +366,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 	}
 	| HEADERGEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		$$ = create_cond_4(rs, COND_HEADERGEO, $2, $3, $4, $5);
+		$$ = create_cond_4(rs, COND_HEADERGEO, $2, $3, $4, $5, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -378,20 +378,20 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 #endif
 	}
 	| MACRO STRING STRING	{
-		$$ = create_cond(rs, COND_MACRO, $2, $3);
+		$$ = create_cond(rs, COND_MACRO, $2, $3, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 		free($3);
 	}
 	| BODY STRING		{
-		$$ = create_cond(rs, COND_BODY, $2, NULL);
+		$$ = create_cond(rs, COND_BODY, $2, NULL, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| PHASEDONE STRING	{
-		$$ = create_cond(rs, COND_PHASEDONE, $2, NULL);
+		$$ = create_cond(rs, COND_PHASEDONE, $2, NULL, yylval.lineno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -475,13 +475,14 @@ static const struct keywords keywords[] = {
 	{ "discard",	DISCARD,	K_TYPE_ACTION,	ACTION_DISCARD },
 	{ "envfrom",	ENVFROM,	K_TYPE_COND,	COND_ENVFROM },
 	{ "envrcpt",	ENVRCPT,	K_TYPE_COND,	COND_ENVRCPT },
+	{ "eoh",	-1,		K_TYPE_COND,	COND_EOH }, /* pseudo-cond used to track connection phase */
+	{ "eom",	-1,		K_TYPE_COND,	COND_EOM }, /* pseudo-cond used to track connection phase */
 	{ "header",	HEADER,		K_TYPE_COND,	COND_HEADER },
 #ifdef GEOIP2
 	{ "headergeo",	HEADERGEO,	K_TYPE_COND,	COND_HEADERGEO },
 #endif
 	{ "helo",	HELO,		K_TYPE_COND,	COND_HELO },
 	{ "macro",	MACRO,		K_TYPE_COND,	COND_MACRO },
-	{ "meta",	META,		K_TYPE_ACTION,	ACTION_META },
 	{ "not",	NOT,		K_TYPE_EXPR,	EXPR_NOT },
 	{ "or",		OR,		K_TYPE_EXPR,	EXPR_OR },
 	{ "phasedone",	PHASEDONE,	K_TYPE_COND,	COND_PHASEDONE },

@@ -41,14 +41,19 @@
 
 enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
 
-/* any of these assigned to context->current_phase need to stay in
+/* any of these assigned to context->current_phase or passed to eval_clear() need to stay in
  * natural sequence, but needn't be contiguous.
  *
- * natural sequence, including values passed to eval_end(), is CONNECT
- * CONNECTGEO HELO ENVFROM ENVRCPT MACRO HEADER HEADERGEO BODY
- * COMPARE_CAPTURES.
+ * generally, the natural sequence is the sequence with which these
+ * are supplied to eval_end() or assigned to context->current_phase:
+ *
+ * CONNECT CONNECTGEO HELO ENVFROM ENVRCPT MACRO HEADER HEADERGEO EOH
+ * BODY EOM COMPARE_CAPTURES.
+ *
+ * MACRO, CONNECTGEO, HEADERGEO, and COMPARE_CAPTURES are not actual message phases,
+ * and EOH and EOM are only message phases, and not actual conds.
  */
-typedef enum { COND_NONE=0,
+typedef enum { COND_NONE=0, COND_CAPTURE_MACRO,
 #ifdef GEOIP2
 	       COND_CAPTURE_MACRO_GEO,
 #endif
@@ -57,23 +62,23 @@ typedef enum { COND_NONE=0,
 	       COND_CONNECTGEO,
 #endif
 	       COND_HELO, COND_ENVFROM, COND_ENVRCPT,
-	       COND_CAPTURE_MACRO, COND_CAPTURE_ONCE_HEADER, COND_CAPTURE_ALL_HEADER,
+	       COND_CAPTURE_ONCE_HEADER, COND_CAPTURE_ALL_HEADER,
 #ifdef GEOIP2
 	       COND_CAPTURE_ONCE_HEADER_GEO, COND_CAPTURE_ALL_HEADER_GEO,
 #endif
-	       COND_MACRO, COND_COMPARE_HEADER, COND_HEADER,
+	       COND_COMPARE_HEADER, COND_MACRO, COND_HEADER,
 #ifdef GEOIP2
 	       COND_HEADERGEO,
 #endif
-	       COND_CAPTURE_ONCE_BODY, COND_CAPTURE_ALL_BODY,
+	       COND_EOH, COND_CAPTURE_ONCE_BODY, COND_CAPTURE_ALL_BODY,
 #ifdef GEOIP2
 	       COND_CAPTURE_ONCE_BODY_GEO, COND_CAPTURE_ALL_BODY_GEO,
 #endif
-	       COND_BODY, COND_COMPARE_CAPTURES,
+	       COND_BODY, COND_EOM, COND_COMPARE_CAPTURES,
 	       COND_PHASEDONE, COND_MAX } cond_t;
 enum { EXPR_AND, EXPR_OR, EXPR_NOT, EXPR_COND };
 typedef enum { ACTION_NONE=0, ACTION_REJECT, ACTION_TEMPFAIL, ACTION_QUARANTINE,
-	ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST, ACTION_META } action_t;
+	ACTION_DISCARD, ACTION_ACCEPT, ACTION_WHITELIST } action_t;
 
 struct expr;
 
@@ -104,6 +109,7 @@ struct cond {
 	}			 args[4];
 	struct expr_list	*expr;
 	unsigned		 idx;
+	int			 lineno;
 };
 
 struct cond_list {
@@ -151,18 +157,18 @@ extern int parse_ruleset(const char *, struct ruleset **, char *, size_t);
 extern const char *lookup_action_name(int action_type);
 extern const char *lookup_cond_name(int cond_type);
 struct ruleset	*create_ruleset(void);
-struct expr	*create_cond(struct ruleset *, int, const char *,
-		    const char *);
-extern struct expr *create_cond_4(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d);
-extern struct expr *create_capture(struct ruleset *rs, int type, const char *a, const char *b, const char *c, const char *d, int lineno);
+struct expr	*create_cond(struct ruleset *, cond_t, const char *,
+		    const char *, int lineno);
+extern struct expr *create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno);
+extern struct expr *create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno);
 struct expr	*create_expr(struct ruleset *, int, struct expr *,
 		    struct expr *);
 struct action	*create_action(struct ruleset *, int, const char *, int lineno);
 struct context;
-struct action	*eval_cond(struct context *context, int,
+struct action	*eval_cond(struct context *context, cond_t,
 		    const char *, const char *);
-struct action	*eval_end(struct context *context, int, int);
-void		 eval_clear(struct context *context, int);
+struct action	*eval_end(struct context *context, cond_t);
+void		 eval_clear(struct context *context, cond_t);
 void		 free_ruleset(struct ruleset *);
 
 struct kv_binding {
@@ -176,6 +182,6 @@ struct kv_binding {
 extern int insert_kv_binding(struct context *context, const char *key, const char *val, size_t val_len, struct kv_binding **point);
 extern const char *get_kv_binding_next(const struct kv_binding **next);
 const char *get_kv_binding_first(struct context *context, const char *key, const struct kv_binding **next);
-void free_kv_bindings(struct kv_binding **list_pp, cond_t maximum_phase);
+void free_kv_bindings(struct context *context, struct kv_binding **list_pp, cond_t maximum_phase);
 
 #endif

@@ -27,6 +27,7 @@ struct context {
 	enum { MESSAGE_INPROGRESS=0, MESSAGE_ABORTED, MESSAGE_COMPLETED, MESSAGE_LOGGED } message_status;
 	struct ruleset	*rs;
 	int		*res;
+	cond_t		*res_phase;
 	char		 buf[2048];	/* longer body lines are wrapped */
 	unsigned	 pos;		/* write position within buf */
 	char		 my_name[128];
@@ -61,7 +62,10 @@ struct context {
 #endif
 };
 
-extern void __attribute__((format(printf,3,4))) msg(int priority, struct context *context, const char *fmt, ...);
+extern void __attribute__((format(printf,3,4))) msg_1(int priority, struct context *context, const char *fmt, ...);
+/* optimization -- don't build the stack for debugging messages when !debug. */
+#define msg(pri, context, ...) ({ if (((pri) != LOG_DEBUG) || debug) { msg_1(pri, context, __VA_ARGS__); }})
+
 extern void __die(const char *fn, int lineno, int this_errno, const char *reason);
 #define die(reason) __die(__FILE__, __LINE__, errno, reason)
 #define die_with_errno(this_errno,reason) __die(__FILE__, __LINE__, this_errno, reason)
