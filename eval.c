@@ -800,8 +800,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			return 1;
 		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
 		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
-		if (r && r != REG_NOMATCH)
+		if (r && r != REG_NOMATCH) {
+			msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 			return -1;
+		}
 		else if ((r == REG_NOMATCH) != c->args[0].not)
 			return 1;
 		else
@@ -812,13 +814,17 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_ALL_HEADER: {
 		/* capture_{once,all}_header <header_LHS_match_re> <header_RHS_selector_re> <varname> */
 
-		if ((! a) || (! b))
+		if ((! a) || (! b)) {
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
 			return -1;
+		}
 
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
-			if (r && r != REG_NOMATCH)
+			if (r && r != REG_NOMATCH) {
+				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 				return -1;
+			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
 				return 1;
 		}
@@ -838,9 +844,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		while (b_len_left > 0) {
 			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
-				if (r != REG_NOMATCH)
+				if (r != REG_NOMATCH) {
+					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
 					return -1;
-				else
+				} else
 					break;
 			}
 
@@ -878,6 +885,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_ALL_HEADER_GEO: {
 		/* capture_{once,all}_header_geo <header_LHS_match_re> <header_RHS_selector_re> <geo_ip_path> <varname> */
 
+		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d", lookup_cond_name(c->type), c->lineno);
 		return -1;
 	}
 #endif
@@ -886,8 +894,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_ALL_BODY: {
 		/* capture_{once,all}_body <body_selector_re> <varname> */
 
-		if (! a)
+		if (! a) {
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
 			return -1;
+		}
 
 		ssize_t a_len_left = (ssize_t)strlen(a);
 
@@ -904,9 +914,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		while (a_len_left > 0) {
 			int r = regexec(&c->args[0].re, a_ptr, sizeof matches / sizeof matches[0], matches, (a_ptr != a) ? REG_NOTBOL : 0);
 			if (r) {
-				if (r != REG_NOMATCH)
+				if (r != REG_NOMATCH) {
+					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 					return -1;
-				else
+				} else
 					break;
 			}
 
@@ -944,6 +955,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_ALL_BODY_GEO: {
 		/* capture_{once,all}_body_geo <body_selector_re> <geo_ip_path> <varname> */
 
+		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d", lookup_cond_name(c->type), c->lineno);
 		return -1;
 	}
 #endif
@@ -951,13 +963,20 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_MACRO: {
 		/* capture_macro <macro_LHS_match_re> <macro_RHS_selector_re> <varname> */
 
-		if ((! a) || (! b))
+		if (! a) {
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
 			return -1;
+		}
+
+		if (! b)
+			return 1;
 
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
-			if (r && r != REG_NOMATCH)
+			if (r && r != REG_NOMATCH) {
+				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 				return -1;
+			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
 				return 1;
 		}
@@ -977,9 +996,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		while (b_len_left > 0) {
 			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
-				if (r != REG_NOMATCH)
+				if (r != REG_NOMATCH) {
+					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
 					return -1;
-				else
+				} else
 					break;
 			}
 
@@ -1013,6 +1033,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_MACRO_GEO: {
 		/* capture_macro_geo <macro_LHS_match_re> <macro_RHS_selector_re> <geo_ip_path> <varname> */
 
+		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d", lookup_cond_name(c->type), c->lineno);
 		return -1;
 	}
 #endif
@@ -1042,12 +1063,16 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		size_t first_operand_preselection_len = 0;
 
 		if (c->type == COND_COMPARE_HEADER) {
-			if ((! a) || (! b))
+			if ((! a) || (! b)) {
+				msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
 				return -1;
+			}
 			if (! c->args[0].empty) {
 				int r = regexec(&c->args[0].re, a, 0, NULL, 0);
-				if (r && r != REG_NOMATCH)
+				if (r && r != REG_NOMATCH) {
+					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 					return -1;
+				}
 				if ((r == REG_NOMATCH) != c->args[0].not)
 					return 1;
 			}
@@ -1058,7 +1083,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			if (! first_operand_preselection) {
 				if (get_envelope_member(context, c->args[0].src, &first_operand_preselection, &first_operand_preselection_len) < 0)
-					break;
+					return 1;
 				first_operand_i = 0;
 			}
 		}
@@ -1067,7 +1092,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		size_t second_operand_preselection_len = 0;
 		if (! second_operand_preselection) {
 		  if (get_envelope_member(context, c->args[2].src, &second_operand_preselection, &second_operand_preselection_len) < 0)
-		    break;
+		    return 1;
 		  second_operand_i = 0;
 		}
 
@@ -1093,9 +1118,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					first_operand_matches,
 					(first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
 			if (r) {
-			  if (r != REG_NOMATCH)
+			  if (r != REG_NOMATCH) {
+			    msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
 			    return -1;
-			  else
+			  } else
 			    goto continue_0;
 			}
 
@@ -1168,9 +1194,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					    second_operand_matches,
 					    (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
 			    if (r) {
-			      if (r != REG_NOMATCH)
+			      if (r != REG_NOMATCH) {
+				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno);
 				return -1;
-			      else
+			      } else
 				goto continue_2;
 			    }
 
@@ -1305,8 +1332,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if ((! c->args[2].geoip2_path[0]) || (! geoip2_db_path))
 			return 0; /* GeoIP2 not configured or not working -- fail open. */
 
-		if (! b)
+		if (! b) {
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
 			return -1;
+		}
 		if (c->args[0].empty) {
 			if (a) {
 				if (c->args[0].not)
@@ -1316,14 +1345,18 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					return 1;
 			}
 		} else {
-			if (a == NULL)
+			if (a == NULL) {
+				msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
 				return -1;
+			}
 		}
 
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
-			if (r && r != REG_NOMATCH)
+			if (r && r != REG_NOMATCH) {
+				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 				return -1;
+			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
 				return 1;
 		}
@@ -1337,9 +1370,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			while (b_len_left > 0) {
 				int r = regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0);
 				if (r) {
-					if (r != REG_NOMATCH)
+					if (r != REG_NOMATCH) {
+						msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
 						return -1;
-					else
+					} else
 						return 1;
 				}
 
@@ -1415,41 +1449,51 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 #endif
 
 	default:
-		break;
+
+		for (int i = 0; i < 2; ++i) {
+			const char *d = i ? b : a;
+			int r;
+			if (c->args[i].src == NULL)
+				continue;
+			if (c->args[i].empty) {
+				/* if the test value is set, the result is pass for // and fail for //n .
+				 * if the test value is null, the result is pass for //n and fail for // .
+				 * but with an empty regexp, the result is never error.  effectively,
+				 * //n is a test for the null pointer.
+				 */
+				if (d) {
+					if (c->args[i].not)
+						return 1;
+					else
+						continue;
+				} else {
+					if (c->args[i].not)
+						continue;
+					else
+						return 1;
+				}
+			}
+			if (d == NULL) {
+				if ((c->type == COND_MACRO) && (i == 1))
+					return 1; /* a null macro RHS is just a normal mismatch. */
+				else {
+					msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d (%s)", __FILE__, __LINE__, c->lineno, lookup_cond_name(c->type));
+					return -1;
+				}
+			}
+			r = regexec(&c->args[i].re, d, 0, NULL, 0);
+			if (r && r != REG_NOMATCH) {
+				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[i].src, c->lineno);
+				return -1;
+			}
+			if ((r == REG_NOMATCH) != c->args[i].not)
+				return 1;
+		}
+		return 0;
 	}
 
-	for (int i = 0; i < 2; ++i) {
-		const char *d = i ? b : a;
-		int r;
-		if (c->args[i].src == NULL)
-			continue;
-		if (c->args[i].empty) {
-			/* if the test value is set, the result is pass for // and fail for //n .
-			 * if the test value is null, the result is pass for //n and fail for // .
-			 * but with an empty regexp, the result is never error.  effectively,
-			 * //n is a test for the null pointer.
-			 */
-			if (d) {
-				if (c->args[i].not)
-					return 1;
-				else
-					continue;
-			} else {
-				if (c->args[i].not)
-					continue;
-				else
-					return 1;
-			}
-		}
-		if (d == NULL)
-			return (-1);
-		r = regexec(&c->args[i].re, d, 0, NULL, 0);
-		if (r && r != REG_NOMATCH)
-			return (-1);
-		if ((r == REG_NOMATCH) != c->args[i].not)
-			return (1);
-	}
-	return (0);
+	msg(LOG_DEBUG, context, "flow error -- check_cond fell through to end checking %s cond at conf L%d", lookup_cond_name(c->type), c->lineno);
+	return 1;
 }
 
 static void
