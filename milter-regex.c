@@ -473,6 +473,7 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 		break;
 	case ACTION_QUARANTINE:
 		/* result stays SMFIS_CONTINUE */
+		break;
 	case ACTION_DISCARD:
 		result = SMFIS_DISCARD;
 		break;
