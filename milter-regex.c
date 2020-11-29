@@ -1613,6 +1613,9 @@ main(int argc, char **argv)
 #endif
 
 	if (exit_after_load_flag) {
+#ifdef USE_GMIME
+		g_mime_shutdown();
+#endif
 		fprintf(stderr,"Exiting after successful initialization.\n");
 		exit(0);
 	}
@@ -1667,6 +1670,10 @@ main(int argc, char **argv)
 		if (geoip2_closedb() < 0)
 			msg(LOG_ERR, NULL,"geoip2_closedb(%s): %s\n",geoip2_db_path,strerror(errno));
 	}
+#endif
+
+#ifdef USE_GMIME
+	g_mime_shutdown();
 #endif
 
 done:
