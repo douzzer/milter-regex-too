@@ -513,7 +513,7 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 
 #ifdef EXPERIMENTING_WITH_CONTINUATION
 #define SETREPLY_RETURN_IF_DONE(smi_ctx, mr_ctx, eval_phase, action, before_returning...) ({ \
-			sfsistat _ret = setreply(ctx, context, COND_CONNECT, action); \
+			sfsistat _ret = setreply(ctx, context, eval_phase, action); \
 			if ((_ret != SMFIS_CONTINUE) || \
 			    (mr_ctx->action_result != SMFIS_CONTINUE)) { \
 				before_returning; \
@@ -525,7 +525,7 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 
 #define SETREPLY_RETURN_IF_DONE(smi_ctx, mr_ctx, eval_phase, action, before_returning...) ({ \
 			before_returning;				\
-			return setreply(ctx, context, COND_CONNECT, action); \
+			return setreply(ctx, context, eval_phase, action); \
 			})
 
 #endif
