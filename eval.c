@@ -683,44 +683,49 @@ void free_kv_bindings(struct context *context, struct kv_binding **list_pp, cond
 static int compare_values(const char *first, size_t first_len, struct cond_arg *first_cond,
 			  const char *second, size_t second_len, struct cond_arg *second_cond) {
 
+	int (*cmp_fn)(const char *s1, const char *s2, size_t n);
+	if (first_cond->compare_case_insensitively || second_cond->compare_case_insensitively)
+		cmp_fn = strncasecmp;
+	else
+		cmp_fn = (int (*)(const char *, const char *, size_t))memcmp;
 	if (first_len == second_len)
-		return memcmp(first, second, first_len);
+		return cmp_fn(first, second, first_len);
 	else if (second_len > first_len) {
 		if (first_cond->compare_as_suffix) {
-			if (! memcmp(first, second + (second_len - first_len), first_len))
+			if (! cmp_fn(first, second + (second_len - first_len), first_len))
 				return 0;
 		}
 		if (first_cond->compare_as_dname_suffix) {
 			if ((*(second + (second_len - first_len) - 1) == '.') &&
-			    (! memcmp(first, second + (second_len - first_len), first_len)))
+			    (! cmp_fn(first, second + (second_len - first_len), first_len)))
 				return 0;
 		}
 		if (first_cond->compare_as_prefix) {
-			if (! memcmp(first, second, first_len))
+			if (! cmp_fn(first, second, first_len))
 				return 0;
 		}
 		if (first_cond->compare_as_dname_prefix) {
 			if ((second[first_len] == '.') &&
-			    (! memcmp(first, second, first_len)))
+			    (! cmp_fn(first, second, first_len)))
 				return 0;
 		}
 	} else {
 		if (second_cond->compare_as_suffix) {
-			if (! memcmp(second, first + (first_len - second_len), second_len))
+			if (! cmp_fn(second, first + (first_len - second_len), second_len))
 				return 0;
 		}
 		if (second_cond->compare_as_dname_suffix) {
 			if ((*(first + (first_len - second_len) - 1) == '.') &&
-			    (! memcmp(second, first + (first_len - second_len), second_len)))
+			    (! cmp_fn(second, first + (first_len - second_len), second_len)))
 				return 0;
 		}
 		if (second_cond->compare_as_prefix) {
-			if (! memcmp(second, first, second_len))
+			if (! cmp_fn(second, first, second_len))
 				return 0;
 		}
 		if (second_cond->compare_as_dname_prefix) {
 			if ((first[second_len] == '.') &&
-			    (! memcmp(second, first, second_len)))
+			    (! cmp_fn(second, first, second_len)))
 				return 0;
 		}
 	}
@@ -1640,6 +1645,9 @@ build_regex(struct cond_arg *a)
 		case 'S':
 			a->compare_as_dname_suffix = 1;
 			break;
+		case 'I':
+			a->compare_case_insensitively = 1;
+			break;
 
 		default:
 			yyerror("invalid flag %c in %s", *flags_i, a->src);
@@ -1726,6 +1734,11 @@ build_regex(struct cond_arg *a)
 static int
 build_geoip2_path(struct cond_arg *a)
 {
+	if (! geoip2_db_path) {
+		yyerror("create_cond_4: geoip condition, but no geoip database path.\n");
+		return 1;
+	}
+
 	a->empty = 1;
 
 	if (! (a->geoip2_buf = strdup(a->src))) {
