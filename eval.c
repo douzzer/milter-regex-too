@@ -1115,7 +1115,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		     first_operand_preselection = first_operand_i ? get_kv_binding_next(&first_operand_i) : 0)
 /* 1 */		{
 		  const char *first_operand;
-		  size_t first_operand_len;
+		  size_t first_operand_len = 0;
 		  ssize_t first_operand_len_left = first_operand_preselection_len ? (ssize_t)first_operand_preselection_len : (ssize_t)strlen(first_operand_preselection);
 		  const char *first_operand_ptr = first_operand_preselection;
 
@@ -1127,7 +1127,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		       second_operand_preselection = second_operand_i ? get_kv_binding_next(&second_operand_i) : 0)
 /* 2 */		  {
 		    const char *second_operand;
-		    size_t second_operand_len;
+		    size_t second_operand_len = 0;
 		    ssize_t second_operand_len_left =
 		      second_operand_preselection_len ?
 		      (ssize_t)second_operand_preselection_len :
