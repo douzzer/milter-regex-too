@@ -806,7 +806,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
 		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
 		if (r && r != REG_NOMATCH) {
-			msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+			msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 			return -1;
 		}
 		else if ((r == REG_NOMATCH) != c->args[0].not)
@@ -827,7 +827,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
@@ -850,7 +850,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH) {
-					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
 					return -1;
 				} else
 					break;
@@ -920,7 +920,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			int r = regexec(&c->args[0].re, a_ptr, sizeof matches / sizeof matches[0], matches, (a_ptr != a) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH) {
-					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 					return -1;
 				} else
 					break;
@@ -979,7 +979,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
@@ -1002,7 +1002,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH) {
-					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
 					return -1;
 				} else
 					break;
@@ -1053,17 +1053,26 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 		/* test passes if any of vals for the first key equal any of the vals for the second. */
 
-		/*
-		 * note this is quite an elaborate nested loop proposition.  not only
-		 * is there iteration among all members of each set, but for the _re
-		 * variant, for each member there is iteration through captures, not
-		 * just through captures via a multi-capture RE, but for global-tagged
-		 * REs, through all captures tiling the RE across each member.  the
-		 * cumulative iterator depth is 6, but looks like 4 because the two
-		 * stages of RE iteration are done with goto.
+		/* if either selection RE has the O flag, the test is an ordered comparison of all captures for each left hand val with all captures for each right hand val,
+		 * i.e. if {"a.b.c", "d.e.f"} on the left is selected with /[[:alnum:]]+/gO, and {"g-h-i", "a-b-c"} is selected with /[[:alnum:]]+/g on the right, they
+		 * will succeed on the match of selections from "a.b.c" and "a-b-c".
 		 */
 
-		const struct kv_binding *first_operand_i, *second_operand_i;
+		/*
+		 * note this is quite an elaborate nested loop proposition.  not only
+		 * is there iteration among all members of each set, but also, for
+		 * each member there is iteration through captures, not
+		 * just through captures via a multi-capture RE, but for global-tagged
+		 * REs, through all captures tiling the RE across each member.  the
+		 * cumulative iterator depth is 6.
+		 *
+		 * with the 'O' flag, an alternate codepath is followed, using gotos
+		 * to collapse levels 3-6 into a single loop with the two operands
+		 * stepping forward in sync, so that all selections can be compared
+		 * in order.
+		 */
+
+		const struct kv_binding *first_operand_i, *second_operand_i_first;
 		const char *first_operand_preselection;
 		size_t first_operand_preselection_len = 0;
 
@@ -1075,7 +1084,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			if (! c->args[0].empty) {
 				int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 				if (r && r != REG_NOMATCH) {
-					msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 					return -1;
 				}
 				if ((r == REG_NOMATCH) != c->args[0].not)
@@ -1093,182 +1102,377 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			}
 		}
 
-		const char *second_operand_preselection = get_kv_binding_first(context, c->args[2].src, &second_operand_i);
+		const char *second_operand_preselection_first = get_kv_binding_first(context, c->args[2].src, &second_operand_i_first);
 		size_t second_operand_preselection_len = 0;
-		if (! second_operand_preselection) {
-		  if (get_envelope_member(context, c->args[2].src, &second_operand_preselection, &second_operand_preselection_len) < 0)
+		if (! second_operand_preselection_first) {
+		  if (get_envelope_member(context, c->args[2].src, &second_operand_preselection_first, &second_operand_preselection_len) < 0)
 		    return 1;
-		  second_operand_i = 0;
+		  second_operand_i_first = 0;
 		}
 
-		for (; first_operand_preselection; first_operand_preselection = first_operand_i ? get_kv_binding_next(&first_operand_i) : 0) {
+		for (;
+		     first_operand_preselection;
+		     first_operand_preselection = first_operand_i ? get_kv_binding_next(&first_operand_i) : 0)
+/* 1 */		{
 		  const char *first_operand;
 		  size_t first_operand_len;
-
 		  ssize_t first_operand_len_left = first_operand_preselection_len ? (ssize_t)first_operand_preselection_len : (ssize_t)strlen(first_operand_preselection);
 		  const char *first_operand_ptr = first_operand_preselection;
-		  regmatch_t first_operand_matches[8];
-		  int first_operand_matches_i = 0;
-		  int first_operand_n_captures = 0;
 
-		  while (first_operand_len_left > 0) {
+		  const char *second_operand_preselection = second_operand_preselection_first;
+		  const struct kv_binding *second_operand_i = second_operand_i_first;
 
-		    if (c->args[1].src && ! c->args[1].empty) {
-		      /* if multiple selections, need to iterate through the selections. */
+		  for (;
+		       second_operand_preselection;
+		       second_operand_preselection = second_operand_i ? get_kv_binding_next(&second_operand_i) : 0)
+/* 2 */		  {
+		    const char *second_operand;
+		    size_t second_operand_len;
+		    ssize_t second_operand_len_left =
+		      second_operand_preselection_len ?
+		      (ssize_t)second_operand_preselection_len :
+		      (ssize_t)strlen(second_operand_preselection);
+		    const char *second_operand_ptr = second_operand_preselection;
 
-		      if (first_operand_matches_i == 0) {
-			int r = regexec(&c->args[1].re,
-					first_operand_ptr,
-					sizeof first_operand_matches / sizeof first_operand_matches[0],
-					first_operand_matches,
-					(first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
-			if (r) {
-			  if (r != REG_NOMATCH) {
-			    msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
-			    return -1;
-			  } else
-			    goto continue_0;
-			}
+/* 3 */
+		    if (c->args[1].compare_ordered_match_all_selections || c->args[3].compare_ordered_match_all_selections) {
 
-			first_operand_len_left -= first_operand_matches[0].rm_eo;
-			first_operand_ptr += first_operand_matches[0].rm_eo;
+		      regmatch_t first_operand_matches[8];
+		      int first_operand_matches_i = 0;
+		      int first_operand_matches_left = 0;
+		      int first_operand_n_captures = 0;
 
-		      }
-
-		    next_first_operand_match:
-
-		      ++first_operand_matches_i;
-
-		      if ((first_operand_matches_i == (int)(sizeof first_operand_matches / sizeof first_operand_matches[0])) &&
-			  (! first_operand_n_captures))
-			      first_operand_matches_i = 0;
-		      else if ((! first_operand_matches_i) ||
-			       (first_operand_matches_i >= (int)(sizeof first_operand_matches / sizeof first_operand_matches[0]))) {
-		      first_operand_matches_done:
-			if (! c->args[1].global)
-			  break;
-
-			first_operand_matches_i = 0;
-			first_operand_n_captures = 0;
-
-			continue;
-		      }
-		      if (first_operand_matches[first_operand_matches_i].rm_so == -1) {
-			if (! first_operand_matches_i)
-			  goto first_operand_matches_done;
-			else
-			  goto next_first_operand_match;
-		      }
-
-		      ++first_operand_n_captures;
-
-		      first_operand = first_operand_preselection + first_operand_matches[first_operand_matches_i].rm_so;
-		      first_operand_len = first_operand_matches[first_operand_matches_i].rm_eo - first_operand_matches[first_operand_matches_i].rm_so;
-
-		    } else {
-
-		      first_operand = first_operand_preselection;
-		      first_operand_len = first_operand_len_left;
-		      first_operand_len_left = 0;
-
-		    }
-
-		    for (;
-			 second_operand_preselection;
-			 second_operand_preselection = second_operand_i ? get_kv_binding_next(&second_operand_i) : 0) {
-		      const char *second_operand;
-		      size_t second_operand_len;
-
-		      ssize_t second_operand_len_left =
-			      second_operand_preselection_len ?
-			      (ssize_t)second_operand_preselection_len :
-			      (ssize_t)strlen(second_operand_preselection);
-		      const char *second_operand_ptr = second_operand_preselection;
 		      regmatch_t second_operand_matches[8];
 		      int second_operand_matches_i = 0;
+		      int second_operand_matches_left = 0;
 		      int second_operand_n_captures = 0;
 
-		      while (second_operand_len_left > 0) {
+		      int n_matches_overall = 0, mismatch_p = 0;
 
-			if (c->args[3].src && ! c->args[3].empty) {
-			  /* if multiple selections, need to iterate through the selections. */
+		      do
+/* 3-6 'O' */
+		      {
+			if ((! first_operand_len_left) && (! first_operand_matches_left))
+			  first_operand = 0;
+			else if (c->args[1].empty || (! c->args[1].src)) {
+			  first_operand = first_operand_preselection;
+			  first_operand_len = first_operand_len_left;
+			  first_operand_matches_left = 0;
+			  first_operand_len_left = 0;
+			} else {
+			first_next_O_outer_capture:
+			  first_operand = 0;
+			  if ((first_operand_len_left > 0) && (first_operand_matches_left <= 0))  {
+			    int r = regexec(&c->args[1].re,
+					    first_operand_ptr,
+					    sizeof first_operand_matches / sizeof first_operand_matches[0],
+					    first_operand_matches,
+					    (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
+			    if (r || (first_operand_matches[0].rm_so < 0)) {
+			      if (r != REG_NOMATCH) {
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+				return -1;
+			      } else {
+				first_operand_len_left = 0;
+				goto get_second_O_operand;
+			      }
+			    }
 
-			  if (second_operand_matches_i == 0) {
-			    int r = regexec(&c->args[3].re, second_operand_ptr,
+			    first_operand_matches_left = (int)(sizeof first_operand_matches / sizeof first_operand_matches[0]) + 1; /* +1 for the fallback whole-matched-span */
+			    first_operand_matches_i = 0;
+			    first_operand_n_captures = 0;
+			    if (c->args[1].global) {
+			      first_operand_len_left -= first_operand_matches[0].rm_eo;
+			      first_operand_ptr += first_operand_matches[0].rm_eo;
+			    } else
+			      first_operand_len_left = 0;
+			  }
+
+			first_next_O_inner_capture:
+			  if (first_operand_matches_left > 0) {
+
+			    --first_operand_matches_left;
+			    ++first_operand_matches_i;
+
+			    /* fall back to whole-matched-span if necessary. */
+			    if (first_operand_matches_i == (int)(sizeof first_operand_matches / sizeof first_operand_matches[0])) {
+			      if (! first_operand_n_captures)
+				first_operand_matches_i = 0;
+			      else {
+				first_operand_matches_left = 0;
+				goto first_next_O_outer_capture;
+			      }
+			    }
+
+			    if (first_operand_matches[first_operand_matches_i].rm_so < 0)
+			      goto first_next_O_inner_capture;
+
+			    ++first_operand_n_captures;
+
+			    first_operand = first_operand_preselection + first_operand_matches[first_operand_matches_i].rm_so;
+			    first_operand_len = first_operand_matches[first_operand_matches_i].rm_eo - first_operand_matches[first_operand_matches_i].rm_so;
+
+			  } else if (first_operand_len_left > 0)
+			    goto first_next_O_outer_capture;
+			  /* else leave first_operand null. */
+			}
+
+		      get_second_O_operand:
+
+			if (! second_operand_len_left)
+			  second_operand = 0;
+			else if (c->args[3].empty || (! c->args[3].src)) {
+			  second_operand = second_operand_preselection;
+			  second_operand_len = second_operand_len_left;
+			  second_operand_matches_left = 0;
+			  second_operand_len_left = 0;
+			} else {
+			second_next_O_outer_capture:
+			  second_operand = 0;
+			  if ((second_operand_len_left > 0) && (second_operand_matches_left <= 0))  {
+			    int r = regexec(&c->args[3].re,
+					    second_operand_ptr,
 					    sizeof second_operand_matches / sizeof second_operand_matches[0],
 					    second_operand_matches,
 					    (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
-			    if (r) {
+			    if (r || (second_operand_matches[0].rm_eo < 0)) {
 			      if (r != REG_NOMATCH) {
-				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno);
 				return -1;
-			      } else
-				goto continue_2;
+			      } else {
+				second_operand_len_left = 0;
+				goto compare_O_operands;
+			      }
 			    }
 
-			    second_operand_len_left -= second_operand_matches[0].rm_eo;
-			    second_operand_ptr += second_operand_matches[0].rm_eo;
-
-			  }
-
-			next_second_operand_match:
-
-			  ++second_operand_matches_i;
-
-			  if ((second_operand_matches_i == (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) &&
-			      (! second_operand_n_captures))
-			    second_operand_matches_i = 0;
-			  else if (second_operand_matches_i >= (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) {
-			  second_operand_matches_done:
-			    if (! c->args[3].global)
-			      goto continue_2;
-
+			    second_operand_matches_left = (int)(sizeof second_operand_matches / sizeof second_operand_matches[0]) + 1; /* +1 for the fallback whole-matched-span */
 			    second_operand_matches_i = 0;
 			    second_operand_n_captures = 0;
-			    continue;
-			  }
-			  if (second_operand_matches[second_operand_matches_i].rm_so == -1) {
-			    if (! second_operand_matches_i)
-			      goto second_operand_matches_done;
-			    else
-			      goto next_second_operand_match;
+			    if (c->args[3].global) {
+			      second_operand_len_left -= second_operand_matches[0].rm_eo;
+			      second_operand_ptr += second_operand_matches[0].rm_eo;
+			    } else
+			      second_operand_len_left = 0;
 			  }
 
-			  ++second_operand_n_captures;
+			second_next_O_inner_capture:
+			  if (second_operand_matches_left > 0) {
 
-			  second_operand = second_operand_preselection + second_operand_matches[second_operand_matches_i].rm_so;
-			  second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
+			    --second_operand_matches_left;
+			    ++second_operand_matches_i;
 
-			} else {
+			    /* fall back to whole-matched-span if necessary. */
+			    if (second_operand_matches_i == (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) {
+			      if (! second_operand_n_captures)
+				second_operand_matches_i = 0;
+			      else {
+				second_operand_matches_left = 0;
+				goto second_next_O_outer_capture;
+			      }
+			    }
 
-			  second_operand = second_operand_preselection;
-			  second_operand_len = second_operand_len_left;
-			  second_operand_len_left = 0;
+			    if (second_operand_matches[second_operand_matches_i].rm_so < 0)
+			      goto second_next_O_inner_capture;
 
+			    ++second_operand_n_captures;
+
+			    second_operand = second_operand_preselection + second_operand_matches[second_operand_matches_i].rm_so;
+			    second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
+
+			  } else if (second_operand_len_left > 0)
+			    goto second_next_O_outer_capture;
+			  /* else leave second_operand null. */
 			}
 
-			if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) == 0)
-			  return 0;
+		      compare_O_operands:
 
-			/* end iteration for RE matches inside the current second operand */
+			if ((! first_operand) && (! second_operand))
+			  continue;
+
+			if ((! first_operand) || (! second_operand)) {
+			  mismatch_p = 1;
+			  break;
+			}
+
+			if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) != 0) {
+			  mismatch_p = 1;
+			  break;
+			}
+			++n_matches_overall;
+
+		      } /* end 3 O */
+		      while ((first_operand_len_left > 0) ||
+			     (first_operand_matches_left > 0) ||
+			     (second_operand_len_left > 0) ||
+			     (second_operand_matches_left > 0));
+
+		      if ((n_matches_overall > 0) &&
+			  (! mismatch_p) &&
+			  (first_operand_len_left == 0) &&
+			  (first_operand_matches_left == 0) &&
+			  (second_operand_len_left == 0) &&
+			  (second_operand_matches_left == 0))
+			return 0;
+
+/* end 3-6 'O' */
+
+		    } else /* any-matches-any */ {
+
+		      while (first_operand_len_left > 0)
+/* 3 !'O' */
+		      {
+			regmatch_t first_operand_matches[8];
+			int first_operand_matches_i = 0;
+			int first_operand_matches_left = 0;
+			int first_operand_n_captures = 0;
+
+			do
+/* 4 */
+			{
+
+			  if (c->args[1].empty || (! c->args[1].src)) {
+
+			    first_operand = first_operand_preselection;
+			    first_operand_len = first_operand_len_left;
+			    first_operand_matches_left = 1;
+			    first_operand_len_left = 0;
+
+			  } else {
+
+			    if (first_operand_matches_i == 0) {
+			      int r = regexec(&c->args[1].re,
+					      first_operand_ptr,
+					      sizeof first_operand_matches / sizeof first_operand_matches[0],
+					      first_operand_matches,
+					      (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
+			      if (r) {
+				if (r != REG_NOMATCH) {
+				  msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+				  return -1;
+				} else {
+				  first_operand_len_left = 0;
+				  continue;
+				}
+			      }
+
+
+			      if (c->args[1].global) {
+				first_operand_len_left -= first_operand_matches[0].rm_eo;
+				first_operand_ptr += first_operand_matches[0].rm_eo;
+			      } else
+				first_operand_len_left = 0;
+			      first_operand_matches_left = (int)(sizeof first_operand_matches / sizeof first_operand_matches[0]) + 1; /* +1 for the fallback whole-matched-span */
+			    }
+
+			    ++first_operand_matches_i;
+
+			    /* fall back to whole-matched-span if necessary. */
+			    if (first_operand_matches_i == (int)(sizeof first_operand_matches / sizeof first_operand_matches[0])) {
+			      if (! first_operand_n_captures)
+				first_operand_matches_i = 0;
+			      else
+				break;
+			    }
+
+			    if (first_operand_matches[first_operand_matches_i].rm_so == -1)
+			      continue;
+
+			    ++first_operand_n_captures;
+
+			    first_operand = first_operand_preselection + first_operand_matches[first_operand_matches_i].rm_so;
+			    first_operand_len = first_operand_matches[first_operand_matches_i].rm_eo - first_operand_matches[first_operand_matches_i].rm_so;
+
+			  }
+
+			  while (second_operand_len_left > 0)
+/* 5 */
+			  {
+			    regmatch_t second_operand_matches[8];
+			    int second_operand_matches_i = 0;
+			    int second_operand_matches_left = 0;
+			    int second_operand_n_captures = 0;
+
+			    do
+/* 6 */
+			    {
+
+			      if (c->args[3].empty || (! c->args[3].src)) {
+
+				second_operand = second_operand_preselection;
+				second_operand_len = second_operand_len_left;
+				second_operand_matches_left = 1;
+				second_operand_len_left = 0;
+
+			      } else {
+
+				if (second_operand_matches_i == 0) {
+				  int r = regexec(&c->args[3].re,
+						  second_operand_ptr,
+						  sizeof second_operand_matches / sizeof second_operand_matches[0],
+						  second_operand_matches,
+						  (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
+				  if (r) {
+				    if (r != REG_NOMATCH) {
+				      msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno);
+				      return -1;
+				    } else {
+				      second_operand_len_left = 0;
+				      continue;
+				    }
+				  }
+
+				  if (c->args[3].global) {
+				    second_operand_len_left -= second_operand_matches[0].rm_eo;
+				    second_operand_ptr += second_operand_matches[0].rm_eo;
+				  } else
+				    second_operand_len_left = 0;
+				  second_operand_matches_left = (int)(sizeof second_operand_matches / sizeof second_operand_matches[0]) + 1; /* +1 for the fallback whole-matched-span */
+				}
+
+				++second_operand_matches_i;
+
+				/* fall back to whole-matched-span if necessary. */
+				if (second_operand_matches_i == (int)(sizeof second_operand_matches / sizeof second_operand_matches[0])) {
+				  if (! second_operand_n_captures)
+				    second_operand_matches_i = 0;
+				  else
+				    break;
+				}
+
+				if (second_operand_matches[second_operand_matches_i].rm_so == -1)
+				  continue;
+
+				++second_operand_n_captures;
+
+				second_operand = second_operand_preselection + second_operand_matches[second_operand_matches_i].rm_so;
+				second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
+
+			      }
+
+fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand_len,first_operand,(int)second_operand_len,second_operand);
+
+			      if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) == 0)
+				return 0;
+
+/* end 6 */
+			    } while (--second_operand_matches_left > 0);
+
+/* end 5 */
+			  }
+
+/* end 4 */
+			} while (--first_operand_matches_left > 0);
+
+/* end 3 !'O' */
 		      }
 
-		    continue_2:
-		      ;
-
-		      /* end iteration through values for the second operand */
+/* end 3 */
 		    }
 
-		    if (! c->args[1].src)
-		      break;
-
-		    /* end iteration for RE matches inside the current first operand */
+/* end 2 */
 		  }
 
-
-		continue_0:
-		  ;
-		  /* end iteration through values for the first operand */
+/* end 1 */
 		}
 
 		/* null intersection, return false and try again after the next KV insertion. */
@@ -1359,7 +1563,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
@@ -1376,7 +1580,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 				int r = regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0);
 				if (r) {
 					if (r != REG_NOMATCH) {
-						msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+						msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
 						return -1;
 					} else
 						return 1;
@@ -1488,7 +1692,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			}
 			r = regexec(&c->args[i].re, d, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_DEBUG, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[i].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[i].src, c->lineno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[i].not)
@@ -1648,7 +1852,9 @@ build_regex(struct cond_arg *a)
 		case 'I':
 			a->compare_case_insensitively = 1;
 			break;
-
+		case 'O':
+			a->compare_ordered_match_all_selections = 1;
+			break;
 		default:
 			yyerror("invalid flag %c in %s", *flags_i, a->src);
 			return (1);

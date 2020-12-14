@@ -95,6 +95,7 @@ struct cond {
 		unsigned int	 compare_as_suffix:1;
 		unsigned int	 compare_as_dname_suffix:1;
 		unsigned int	 compare_case_insensitively:1;
+		unsigned int	 compare_ordered_match_all_selections:1;
 
 #ifdef GEOIP2
 		union {
