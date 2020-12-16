@@ -258,6 +258,7 @@ static int geoip2_build_summary(struct context *context) {
 	static const char * const countrypath[] = { "country", "iso_code", (char *)0 };
 	static const char * const subdivpath[] = { "subdivisions", "0", "iso_code", (char *)0 };
 	static const char * const citypath[] = { "city", "names", "en", (char *)0 };
+	static const char * const regcountrypath[] = { "registered_country", "iso_code", (char *)0 };
 /*
 	static const char * const latipath[] = { "location", "latitude", (char *)0 };
 	static const char * const longipath[] = { "location", "longitude", (char *)0 };
@@ -273,9 +274,14 @@ static int geoip2_build_summary(struct context *context) {
 			continue;
 		if ((snprintf_incremental(&cp,&spc," %s/", result->addr) < 0) ||
 		    (copy_geoip2_leaf(&result->result, continentpath, &cp, &spc) < 0) ||
-		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
-		    (copy_geoip2_leaf(&result->result, countrypath, &cp, &spc) < 0) ||
-		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
+		    (snprintf_incremental(&cp,&spc,"/") < 0))
+			return -1;
+		const char *cc = cp;
+		ssize_t cc_len = spc;
+		if (copy_geoip2_leaf(&result->result, countrypath, &cp, &spc) < 0)
+			return -1;
+		cc_len -= spc;
+		if ((snprintf_incremental(&cp,&spc,"/") < 0) ||
 		    (copy_geoip2_leaf(&result->result, subdivpath, &cp, &spc) < 0) ||
 		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
 		    (copy_geoip2_leaf(&result->result, citypath, &cp, &spc) < 0) ||
@@ -286,7 +292,23 @@ static int geoip2_build_summary(struct context *context) {
 		    (snprintf_incremental(&cp,&spc,"/") < 0) ||
 		    (copy_geoip2_leaf(&result->result, longipath, &cp, &spc) < 0)
 */
-)
+			)
+			return -1;
+		char *pre_regcc_cp = cp;
+		ssize_t pre_regcc_spc = spc;
+		if (snprintf_incremental(&cp,&spc,"regCC=") < 0)
+			return -1;
+		const char *regcc = cp;
+		ssize_t regcc_len = spc;
+		if (copy_geoip2_leaf(&result->result, regcountrypath, &cp, &spc) < 0)
+			return -1;
+		regcc_len -= spc;
+		if ((cc_len == regcc_len) && (! memcmp(cc, regcc, cc_len))) {
+			*pre_regcc_cp = 0;
+			cp = pre_regcc_cp;
+			spc = pre_regcc_spc;
+		}
+		if (snprintf_incremental(&cp,&spc,"/") < 0)
 			return -1;
 	}
 
