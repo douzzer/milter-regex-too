@@ -129,7 +129,7 @@ static const struct {
 	{ COND_ENVRCPT, "{rcpt_addr}" },
 	{ COND_ENVRCPT, "{AddressFilter_A_results}" },
 	{ COND_ENVRCPT, "{AddressFilter_D_results}" },
-	{ COND_HEADER, "{AddressFilter_results_eoh}" },
+	{ COND_EOH, "{AddressFilter_results_eoh}" },
 	{ COND_NONE, NULL }
 };
 
