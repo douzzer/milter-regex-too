@@ -120,7 +120,7 @@ static const struct {
 	{ COND_ENVFROM, "{auth_type}" },
 	{ COND_ENVFROM, "{auth_authen}" },
 	{ COND_ENVFROM, "{auth_ssf}" },
-	{ COND_ENVFROM, "{auth_authen}" },
+	{ COND_ENVFROM, "{auth_author}" },
 	{ COND_ENVFROM, "{mail_mailer}" },
 	{ COND_ENVFROM, "{mail_host}" },
 	{ COND_ENVFROM, "{mail_addr}" },
