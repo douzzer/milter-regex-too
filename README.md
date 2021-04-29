@@ -4,8 +4,23 @@ This is `milter-regex-too`, forked from Daniel Hartmeier's `milter-regex` at ver
 See [the master page for milter-regex](https://www.benzedrine.ch/milter-regex.html) for more on
 the original `milter-regex`, currently at version 2.7 (December 12th, 2019).
 
-The most significant enhancements in `milter-regex-too` are GeoIP rules based
-on [`libmaxminddb` from MaxMind](https://github.com/maxmind/libmaxminddb/).
+The most significant enhancements in `milter-regex-too` are
+
+* GeoIP rules based on [`libmaxminddb` from MaxMind](https://github.com/maxmind/libmaxminddb/).
+
+* PCRE2-based regular expression matching
+
+* Stateful captures (key-value pairs) using regexps, and comparison conditions that pivot on those captures
+
+* MIME decoding of Subject, From, and To headers, using GMIME
+
+* Support for additional mailer macros, including {client_resolve}, {server_name},
+{server_addr}, {AddressFilter_A_results}, {AddressFilter_D_results}, and
+{AddressFilter_results_eoh}, the latter 3 to facilitate handoff of DNSRBL
+results collected by custom mailer configurations.
+
+* Message header annotation with GeoIP and decision trace info
+
 
 ## Usage
 
@@ -46,6 +61,13 @@ mainline versions 2.0-2.7:
 * new action: `whitelist` (same as accept, but omits automatic GeoIP lookups)
 
 * new tests: `connectgeo` `headergeo` `phasedone`
+
+* capture directives: capture_macro, capture_once_header, capture_all_header,
+ capture_once_body, capture_all_body (to be documented mañana; for now RTSL,
+ particularly `check_cond()`)
+
+* capture tests: compare_captures, compare_header, and related new regexp flags
+  g, p, P, s, S, I, O (RTSL, particularly `check_cond()` and `build_regex()`)
 
 ### `connectgeo`
 
