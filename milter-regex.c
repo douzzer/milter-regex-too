@@ -1064,11 +1064,7 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 
 	char *rawvalue = 0;
 
-	if (strstr(value,"=?") &&
-	    ((!strcasecmp(name, "From")) ||
-	     (!strcasecmp(name, "To")) ||
-	     (!strcasecmp(name, "Subject")))) {
-
+	if (strstr(value,"=?") && strstr(value,"?=")) {
 	  /* see https://securityintelligence.com/news/security-vulnerabilities-in-rfc-1342-enable-spoofing-and-code-injection-attacks/
 	   * and https://tools.ietf.org/html/rfc2047 "MIME (Multipurpose Internet Mail Extensions) Part Three:
 	   *   Message Header Extensions for Non-ASCII Text" (the current version of the encoding/protocol).
