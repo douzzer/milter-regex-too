@@ -112,6 +112,7 @@ struct cond {
 	struct expr_list	*expr;
 	unsigned		 idx;
 	int			 lineno;
+	int			 colno;
 };
 
 struct cond_list {
@@ -140,6 +141,7 @@ struct action {
 	char			*msg;
 	unsigned		 idx;
 	int			 lineno;
+	int			 colno;
 };
 
 struct action_list {
@@ -160,12 +162,12 @@ extern const char *lookup_action_name(int action_type);
 extern const char *lookup_cond_name(int cond_type);
 struct ruleset	*create_ruleset(void);
 struct expr	*create_cond(struct ruleset *, cond_t, const char *,
-		    const char *, int lineno);
-extern struct expr *create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno);
-extern struct expr *create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno);
+		    const char *, int lineno, int colno);
+extern struct expr *create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno);
+extern struct expr *create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno);
 struct expr	*create_expr(struct ruleset *, int, struct expr *,
 		    struct expr *);
-struct action	*create_action(struct ruleset *, int, const char *, int lineno);
+struct action	*create_action(struct ruleset *, int, const char *, int lineno, int colno);
 struct context;
 struct action	*eval_cond(struct context *context, cond_t,
 		    const char *, const char *);

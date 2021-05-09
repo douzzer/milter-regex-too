@@ -120,7 +120,7 @@ create_ruleset(void)
 }
 
 struct expr *
-create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno)
+create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno)
 {
 	struct cond *cond = NULL;
 	struct cond_list *cl = NULL;
@@ -160,6 +160,7 @@ create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, con
 
 		cond->type = type;
 		cond->lineno = lineno;
+		cond->colno = colno;
 
 		if (a != NULL) {
 			cond->args[0].src = strdup(a);
@@ -325,15 +326,15 @@ error:
 }
 
 struct expr *
-create_cond(struct ruleset *rs, cond_t type, const char *a, const char *b, int lineno)
+create_cond(struct ruleset *rs, cond_t type, const char *a, const char *b, int lineno, int colno)
 {
-	return create_cond_4(rs, type, a, b, NULL, NULL, lineno);
+	return create_cond_4(rs, type, a, b, NULL, NULL, lineno, colno);
 }
 
 struct expr *
-create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno)
+create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno)
 {
-	struct expr *cap_expr = create_cond_4(rs, type, a, b, c, d, lineno);
+	struct expr *cap_expr = create_cond_4(rs, type, a, b, c, d, lineno, colno);
 	if (cap_expr == NULL)
 		return NULL;
 
@@ -395,7 +396,7 @@ error:
 }
 
 struct action *
-create_action(struct ruleset *rs, int type, const char *msgtxt, int lineno)
+create_action(struct ruleset *rs, int type, const char *msgtxt, int lineno, int colno)
 {
 	struct action *a = NULL;
 	struct action_list *al = NULL;
@@ -411,6 +412,7 @@ create_action(struct ruleset *rs, int type, const char *msgtxt, int lineno)
 	a->msg = msgtxt == NULL ? NULL : strdup(msgtxt);
 	a->idx = rs->maxidx++;
 	a->lineno = lineno;
+	a->colno = colno;
 	al->action = a;
 	/* tail insert, so actions have same order as file */
 	if (rs->action == NULL)
@@ -580,9 +582,10 @@ eval_clear(struct context *context, cond_t type)
 	for (struct action_list *al = rs->action; al != NULL; al = al->next) {
 		if (context->res[al->action->idx] != VAL_UNDEF) {
 			msg(LOG_DEBUG, context,
-			    "cleared action %s @L%d %s@%s -> %s@%s",
+			    "cleared action %s @L%d@%d %s@%s -> %s@%s",
 			    lookup_action_name(al->action->type),
 			    al->action->lineno,
+			    al->action->colno,
 			    lookup_res_name(context->res[al->action->idx]),
 			    lookup_cond_name(context->res_phase[al->action->idx]),
 			    lookup_res_name(VAL_UNDEF),
@@ -806,7 +809,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
 		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
 		if (r && r != REG_NOMATCH) {
-			msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+			msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 			return -1;
 		}
 		else if ((r == REG_NOMATCH) != c->args[0].not)
@@ -820,14 +823,14 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		/* capture_{once,all}_header <header_LHS_match_re> <header_RHS_selector_re> <varname> */
 
 		if ((! a) || (! b)) {
-			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d@%d", __FILE__, __LINE__, c->lineno, c->colno);
 			return -1;
 		}
 
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
@@ -850,7 +853,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH) {
-					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
 					return -1;
 				} else
 					break;
@@ -890,7 +893,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_ALL_HEADER_GEO: {
 		/* capture_{once,all}_header_geo <header_LHS_match_re> <header_RHS_selector_re> <geo_ip_path> <varname> */
 
-		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d", lookup_cond_name(c->type), c->lineno);
+		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d@%d", lookup_cond_name(c->type), c->lineno, c->colno);
 		return -1;
 	}
 #endif
@@ -900,7 +903,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		/* capture_{once,all}_body <body_selector_re> <varname> */
 
 		if (! a) {
-			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d@%d", __FILE__, __LINE__, c->lineno, c->colno);
 			return -1;
 		}
 
@@ -920,7 +923,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			int r = regexec(&c->args[0].re, a_ptr, sizeof matches / sizeof matches[0], matches, (a_ptr != a) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH) {
-					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 					return -1;
 				} else
 					break;
@@ -960,7 +963,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_ALL_BODY_GEO: {
 		/* capture_{once,all}_body_geo <body_selector_re> <geo_ip_path> <varname> */
 
-		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d", lookup_cond_name(c->type), c->lineno);
+		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d@%d", lookup_cond_name(c->type), c->lineno, c->colno);
 		return -1;
 	}
 #endif
@@ -969,7 +972,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		/* capture_macro <macro_LHS_match_re> <macro_RHS_selector_re> <varname> */
 
 		if (! a) {
-			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d@%d", __FILE__, __LINE__, c->lineno, c->colno);
 			return -1;
 		}
 
@@ -979,7 +982,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
@@ -1002,7 +1005,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
 			if (r) {
 				if (r != REG_NOMATCH) {
-					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
 					return -1;
 				} else
 					break;
@@ -1038,7 +1041,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 	case COND_CAPTURE_MACRO_GEO: {
 		/* capture_macro_geo <macro_LHS_match_re> <macro_RHS_selector_re> <geo_ip_path> <varname> */
 
-		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d", lookup_cond_name(c->type), c->lineno);
+		msg(LOG_DEBUG, context, "attempt to use unimplemented cond %s at conf L%d@%d", lookup_cond_name(c->type), c->lineno, c->colno);
 		return -1;
 	}
 #endif
@@ -1078,13 +1081,13 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 		if (c->type == COND_COMPARE_HEADER) {
 			if ((! a) || (! b)) {
-				msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
+				msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d@%d", __FILE__, __LINE__, c->lineno, c->colno);
 				return -1;
 			}
 			if (! c->args[0].empty) {
 				int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 				if (r && r != REG_NOMATCH) {
-					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 					return -1;
 				}
 				if ((r == REG_NOMATCH) != c->args[0].not)
@@ -1170,7 +1173,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					    (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
 			    if (r || (first_operand_matches[0].rm_so < 0)) {
 			      if (r != REG_NOMATCH) {
-				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
 				return -1;
 			      } else {
 				first_operand_len_left = 0;
@@ -1237,7 +1240,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					    (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
 			    if (r || (second_operand_matches[0].rm_eo < 0)) {
 			      if (r != REG_NOMATCH) {
-				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno, c->colno);
 				return -1;
 			      } else {
 				second_operand_len_left = 0;
@@ -1347,7 +1350,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					      (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
 			      if (r) {
 				if (r != REG_NOMATCH) {
-				  msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+				  msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
 				  return -1;
 				} else {
 				  first_operand_len_left = 0;
@@ -1413,7 +1416,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 						  (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
 				  if (r) {
 				    if (r != REG_NOMATCH) {
-				      msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno);
+				      msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno, c->colno);
 				      return -1;
 				    } else {
 				      second_operand_len_left = 0;
@@ -1448,8 +1451,6 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 				second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
 
 			      }
-
-fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand_len,first_operand,(int)second_operand_len,second_operand);
 
 			      if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) == 0)
 				return 0;
@@ -1542,7 +1543,7 @@ fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand
 			return 0; /* GeoIP2 not configured or not working -- fail open. */
 
 		if (! b) {
-			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
+			msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d@%d", __FILE__, __LINE__, c->lineno, c->colno);
 			return -1;
 		}
 		if (c->args[0].empty) {
@@ -1555,7 +1556,7 @@ fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand
 			}
 		} else {
 			if (a == NULL) {
-				msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d", __FILE__, __LINE__, c->lineno);
+				msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d@%d", __FILE__, __LINE__, c->lineno, c->colno);
 				return -1;
 			}
 		}
@@ -1563,7 +1564,7 @@ fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand
 		if (! c->args[0].empty) {
 			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[0].not)
@@ -1580,7 +1581,7 @@ fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand
 				int r = regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0);
 				if (r) {
 					if (r != REG_NOMATCH) {
-						msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno);
+						msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
 						return -1;
 					} else
 						return 1;
@@ -1686,13 +1687,13 @@ fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand
 				if ((c->type == COND_MACRO) && (i == 1))
 					return 1; /* a null macro RHS is just a normal mismatch. */
 				else {
-					msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d (%s)", __FILE__, __LINE__, c->lineno, lookup_cond_name(c->type));
+					msg(LOG_DEBUG, context, "null arg error in %s@%d, at conf L%d@%d (%s)", __FILE__, __LINE__, c->lineno, c->colno, lookup_cond_name(c->type));
 					return -1;
 				}
 			}
 			r = regexec(&c->args[i].re, d, 0, NULL, 0);
 			if (r && r != REG_NOMATCH) {
-				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d", r, __FILE__, __LINE__, c->args[i].src, c->lineno);
+				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[i].src, c->lineno, c->colno);
 				return -1;
 			}
 			if ((r == REG_NOMATCH) != c->args[i].not)
@@ -1701,7 +1702,7 @@ fprintf(stderr,"!O compare L%d \"%.*s\" \"%.*s\"\n",c->lineno,(int)first_operand
 		return 0;
 	}
 
-	msg(LOG_DEBUG, context, "flow error -- check_cond fell through to end checking %s cond at conf L%d", lookup_cond_name(c->type), c->lineno);
+	msg(LOG_DEBUG, context, "flow error -- check_cond fell through to end checking %s cond at conf L%d@%d", lookup_cond_name(c->type), c->lineno, c->colno);
 	return 1;
 }
 
@@ -1765,10 +1766,11 @@ push_cond_result(struct context *context, struct cond *c, int val)
 		return;
 
 	msg(LOG_DEBUG, context,
-	    "pushed result %s \"%s\"... @L%d %s@%s -> %s@%s",
+	    "pushed result %s \"%s\"... @L%d@%d %s@%s -> %s@%s",
 	    lookup_cond_name(c->type),
 	    c->args[0].src,
 	    c->lineno,
+	    c->colno,
 	    lookup_res_name(context->res[c->idx]),
 	    lookup_cond_name(context->res_phase[c->idx]),
 	    lookup_res_name(val),

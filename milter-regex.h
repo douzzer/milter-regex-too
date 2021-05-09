@@ -53,6 +53,7 @@ struct context {
 	const struct action *action;
 	sfsistat	 action_result;
 	long long int	 action_at;
+	char		*res_report;
 #ifdef GEOIP2
 	int geoip2_lookup_ret;
 	struct MMDB_lookup_result_s *geoip2_result;

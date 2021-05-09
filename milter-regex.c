@@ -337,9 +337,92 @@ int geoip2_refresh_summary(struct context *context) {
 
 #endif /* GEOIP2 */
 
+static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static int build_res_report(struct context *context) {
+	if (context->res_report)
+		return 0;
+	context->res_report = (char *)malloc(context->rs->maxidx + 1);
+	if (! context->res_report)
+		return -1;
+	else {
+		char *crbp = context->res_report;
+		int thischar = 0;
+		int thisbit = 0;
+		for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
+			for (struct cond_list *cl = context->rs->cond[cl_i];
+			     cl;
+			     cl = cl->next) {
+				if (context->res[cl->cond->idx] == VAL_TRUE)
+					thischar |= 1 << thisbit;
+				if (++thisbit == 6) {
+					*crbp++ = base64_chars[thischar];
+					thischar = 0;
+					thisbit = 0;
+				}
+			}
+		}
+		if (thisbit > 0)
+			*crbp++ = base64_chars[thischar];
+		*crbp = 0;
+		return 0;
+	}
+}
+
+static int res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_all_flag) {
+	int cond_n = 0;
+	int res_len = strlen(res_to_decode);
+	for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
+		for (const struct cond_list *cl = rs->cond[cl_i];
+		     cl;
+		     cl = cl->next) {
+			int cond_byte_offset = cond_n / 6;
+			int cond_bit_offset = cond_n % 6;
+			if (cond_byte_offset >= res_len) {
+				printf("supplied res is too short for loaded config.\n");
+				return -1;
+			}
+			int decoded = res_to_decode[cond_byte_offset];
+			if ((decoded >= 'A') && (decoded <= 'Z'))
+				decoded -= 'A';
+			else if ((decoded >= 'a') && (decoded <= 'z'))
+				decoded -= ('a' - 26);
+			else if ((decoded >= '0') && (decoded <= '9'))
+				decoded -= ('0' - 52);
+			else if (decoded == '/')
+				decoded = 62;
+			else if (decoded == '+')
+				decoded = 63;
+			else {
+				printf("supplied res has non-base64 char #%d.\n", decoded);
+				return -1;
+			}
+			if (decode_all_flag || (decoded & (1 << cond_bit_offset))) {
+				printf("R=%d L%d C%d %s", decoded & (1 << cond_bit_offset) ? 1 : 0, cl->cond->lineno, cl->cond->colno, lookup_cond_name(cl->cond->type));
+				if (cl->cond->args[0].src)
+					printf(" %s", cl->cond->args[0].src);
+				if (cl->cond->args[1].src)
+					printf(" %s", cl->cond->args[1].src);
+				if (cl->cond->args[2].src)
+					printf(" %s", cl->cond->args[2].src);
+				if (cl->cond->args[3].src)
+					printf(" %s", cl->cond->args[3].src);
+				putchar('\n');
+			}
+			++cond_n;
+		}
+	}
+	if ((cond_n + 5) / 6 != res_len) {
+		printf("supplied res length is %d, but loaded config produces res length %d.\n", res_len, (cond_n + 5) / 6);
+		return -1;
+	} else
+		return 0;
+}
+
 static void
 setreply_lognotice(struct context *context) {
 	int lvl;
+
 	if ((! context->action) || (context->action->type == ACTION_ACCEPT) || (context->action->type == ACTION_WHITELIST))
 		lvl = LOG_DEBUG;
 	else
@@ -402,6 +485,8 @@ setreply_lognotice(struct context *context) {
 		geoip2_result_summary = "";
 #endif
 
+	build_res_report(context);
+
 	const char *last_phase_done = lookup_cond_name(context->last_phase_done);
 	char done_at[256];
 	if (context->end_eval_note[0])
@@ -417,7 +502,8 @@ setreply_lognotice(struct context *context) {
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
-		    , action_name,
+		    ", res: %s",
+		    action_name,
 		    context->action ? context->action->lineno : 0,
 		    context->action ? (context->action_at - context->created_at) / 1000LL : 0LL,
 		    context->action ? (context->action_at - context->created_at) % 1000LL : 0LL,
@@ -441,6 +527,7 @@ setreply_lognotice(struct context *context) {
 #ifdef GEOIP2
 		    , geoip2_result_summary
 #endif
+		    , context->res_report
 		    );
 	else
 		msg(lvl, context, "%s L%d @%s %.*s (%d): %s%sPTR: %s, TLS: %s, HELO: %s, Authen: %s, FROM: %s, "
@@ -448,7 +535,8 @@ setreply_lognotice(struct context *context) {
 #ifdef GEOIP2
 		    ", GeoIP2: %s"
 #endif
-		    , action_name,
+		    ", res: %s",
+		    action_name,
 		    context->action ? context->action->lineno : 0,
 		    last_phase_done,
 		    (int)sizeof done_at,
@@ -468,6 +556,7 @@ setreply_lognotice(struct context *context) {
 #ifdef GEOIP2
 		    , geoip2_result_summary
 #endif
+		    , context->res_report
 		    );
 
 	context->message_status = MESSAGE_LOGGED;
@@ -1314,9 +1403,12 @@ cb_eom(SMFICTX *ctx)
 			  snprintf(done_at,sizeof done_at,"%zu-%zu", context->body_start_offset, context->body_end_offset);
 			else
 			  snprintf(done_at,sizeof done_at,"-");
+
+			build_res_report(context);
+
 			char action_msg_buf[512];
 			snprintf(action_msg_buf,sizeof action_msg_buf,
-				 "%s%s%s %lld %d %s %.*s %d",
+				 "%s%s%s %lld %d %s %.*s %d %s",
 				 context->message_id,
 				 context->message_id[0] ? "@" : "",
 				 context->my_name,
@@ -1325,7 +1417,8 @@ cb_eom(SMFICTX *ctx)
 				 last_phase_done,
 				 (int)sizeof done_at,
 				 done_at,
-				 context->check_cond_count);
+				 context->check_cond_count,
+				 context->res_report);
 			(void)smfi_insheader(ctx, 0, (char *)"X-Milter-Regex-Decision-Trace", action_msg_buf);
 		}
 	}
@@ -1367,6 +1460,8 @@ cb_close(SMFICTX *ctx)
 		smfi_setpriv(ctx, NULL);
 		free(context->res);
 		free(context->res_phase);
+		if (context->res_report)
+			free(context->res_report);
 #ifdef GEOIP2
 		if (context->geoip2_result_cache) {
 			if (geoip2_cache_release(&context->geoip2_result_cache) < 0)
@@ -1481,6 +1576,8 @@ main(int argc, char **argv)
 	sfsistat r = MI_FAILURE;
 	const char *ofile = NULL;
 	int exit_after_load_flag = 0;
+	char *res_to_decode = 0;
+	int decode_all_flag = 0;
 
 	tzset();
 
@@ -1490,9 +1587,9 @@ main(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv,
 #ifdef GEOIP2
-		"c:dj:p:u:g:tr:"
+		"c:dj:p:u:g:tR:Sr:"
 #else
-		"c:dj:p:u:tr:"
+		"c:dj:p:u:tR:Sr:"
 #endif
 		)) != -1) {
 		switch (ch) {
@@ -1514,6 +1611,13 @@ main(int argc, char **argv)
 		case 't':
 			debug = 1;
 			exit_after_load_flag = 1;
+			break;
+		case 'R':
+			exit_after_load_flag = 1;
+			res_to_decode = optarg;
+			break;
+		case 'S':
+			decode_all_flag = 1;
 			break;
 #ifdef GEOIP2
 		case 'g':
@@ -1621,8 +1725,16 @@ main(int argc, char **argv)
 	  if (! rs)
 	    exit(1);
 	  release_ruleset(rs);
-	  if (exit_after_load_flag)
+	  if (exit_after_load_flag) {
+		  if (res_to_decode) {
+			  if (res_decode(rs, res_to_decode, decode_all_flag) == 0)
+				  exit(0);
+			  else
+				  exit(1);
+		  }
+		  printf("loaded %d conds and exprs\n",rs->maxidx);
 		  free_ruleset(rs);
+	  }
 	}
 
 #ifdef GEOIP2
@@ -1634,7 +1746,7 @@ main(int argc, char **argv)
 #ifdef USE_GMIME
 		g_mime_shutdown();
 #endif
-		fprintf(stderr,"Exiting after successful initialization.\n");
+		printf("Exiting after successful initialization.\n");
 		exit(0);
 	}
 

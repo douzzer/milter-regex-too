@@ -54,6 +54,7 @@ static size_t		 err_len = 0;
 static const char	*infile = NULL;
 static FILE		*fin = NULL;
 static int		 lineno = 1;
+static int		 colno = 0;
 static int		 errors = 0;
 static struct ruleset	*rs = NULL;
 
@@ -71,6 +72,7 @@ typedef struct {
 		struct action		*action;
 	} v;
 	int lineno;
+	int colno;
 } YYSTYPE;
 #define YYSTYPE_IS_DECLARED
 
@@ -120,14 +122,14 @@ macro	: STRING '=' expr	{
 	;
 
 capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER, $2, $3, $4, NULL, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
 		free($4);
 	}
 	| CAPTURE_ALL_HEADER STRING STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER, $2, $3, $4, NULL, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -135,7 +137,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_ONCE_HEADER_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ONCE_HEADER_GEO, $2, $3, $4, $5, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -147,7 +149,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_ALL_HEADER_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ALL_HEADER_GEO, $2, $3, $4, $5, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -158,20 +160,20 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 #endif
 	}
 	| CAPTURE_ONCE_BODY STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_ONCE_BODY, $2, $3, NULL, NULL, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ONCE_BODY, $2, $3, NULL, NULL, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
 	}
 	| CAPTURE_ALL_BODY STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_ALL_BODY, $2, $3, NULL, NULL, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ALL_BODY, $2, $3, NULL, NULL, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
 	}
 	| CAPTURE_ONCE_BODY_GEO STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_ONCE_BODY_GEO, $2, $3, $4, NULL, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ONCE_BODY_GEO, $2, $3, $4, NULL, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -182,7 +184,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_ALL_BODY_GEO STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_ALL_BODY_GEO, $2, $3, $4, NULL, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_ALL_BODY_GEO, $2, $3, $4, NULL, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -192,7 +194,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 #endif
 	}
 	| CAPTURE_MACRO STRING STRING STRING	{
-		if (! create_capture(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_MACRO, $2, $3, $4, NULL, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -200,7 +202,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 	| CAPTURE_MACRO_GEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		if (! create_capture(rs, COND_CAPTURE_MACRO_GEO, $2, $3, $4, $5, yylval.lineno))
+		if (! create_capture(rs, COND_CAPTURE_MACRO_GEO, $2, $3, $4, $5, yylval.lineno, yylval.colno))
 			YYERROR;
 		free($2);
 		free($3);
@@ -212,7 +214,7 @@ capture	: CAPTURE_ONCE_HEADER STRING STRING STRING	{
 	}
 
 action	: REJECT STRING		{
-	$$ = create_action(rs, ACTION_REJECT, $2, yylval.lineno);
+	$$ = create_action(rs, ACTION_REJECT, $2, yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -220,7 +222,7 @@ action	: REJECT STRING		{
 		free($2);
 	}
 	| TEMPFAIL STRING	{
-		$$ = create_action(rs, ACTION_TEMPFAIL, $2, yylval.lineno);
+		$$ = create_action(rs, ACTION_TEMPFAIL, $2, yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -228,7 +230,7 @@ action	: REJECT STRING		{
 		free($2);
 	}
 	| QUARANTINE STRING	{
-		$$ = create_action(rs, ACTION_QUARANTINE, $2, yylval.lineno);
+		$$ = create_action(rs, ACTION_QUARANTINE, $2, yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -236,21 +238,21 @@ action	: REJECT STRING		{
 		free($2);
 	}
 	| DISCARD 		{
-		$$ = create_action(rs, ACTION_DISCARD, "", yylval.lineno);
+		$$ = create_action(rs, ACTION_DISCARD, "", yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
 		}
 	}
 	| ACCEPT 		{
-		$$ = create_action(rs, ACTION_ACCEPT, "", yylval.lineno);
+		$$ = create_action(rs, ACTION_ACCEPT, "", yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
 		}
 	}
 	| WHITELIST 		{
-		$$ = create_action(rs, ACTION_WHITELIST, "", yylval.lineno);
+		$$ = create_action(rs, ACTION_WHITELIST, "", yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_action");
 			YYERROR;
@@ -304,7 +306,7 @@ expr	: term			{
 	;
 
 term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_COMPARE_CAPTURES, $2, $3, $4, $5, yylval.lineno);
+		$$ = create_cond_4(rs, COND_COMPARE_CAPTURES, $2, $3, $4, $5, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -313,7 +315,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 		free($5);
 	}
 	| COMPARE_HEADER STRING STRING STRING STRING	{
-		$$ = create_cond_4(rs, COND_COMPARE_HEADER, $2, $3, $4, $5, yylval.lineno);
+		$$ = create_cond_4(rs, COND_COMPARE_HEADER, $2, $3, $4, $5, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -322,7 +324,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 		free($5);
 	}
 	| CONNECT STRING STRING	{
-		$$ = create_cond(rs, COND_CONNECT, $2, $3, yylval.lineno);
+		$$ = create_cond(rs, COND_CONNECT, $2, $3, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -330,7 +332,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 	}
 	| CONNECTGEO STRING STRING	{
 #ifdef GEOIP2
-		$$ = create_cond(rs, COND_CONNECTGEO, $2, $3, yylval.lineno);
+		$$ = create_cond(rs, COND_CONNECTGEO, $2, $3, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -340,25 +342,25 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 #endif
 	}
 	| HELO STRING		{
-		$$ = create_cond(rs, COND_HELO, $2, NULL, yylval.lineno);
+		$$ = create_cond(rs, COND_HELO, $2, NULL, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| ENVFROM STRING	{
-		$$ = create_cond(rs, COND_ENVFROM, $2, NULL, yylval.lineno);
+		$$ = create_cond(rs, COND_ENVFROM, $2, NULL, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| ENVRCPT STRING	{
-		$$ = create_cond(rs, COND_ENVRCPT, $2, NULL, yylval.lineno);
+		$$ = create_cond(rs, COND_ENVRCPT, $2, NULL, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| HEADER STRING STRING	{
-		$$ = create_cond(rs, COND_HEADER, $2, $3, yylval.lineno);
+		$$ = create_cond(rs, COND_HEADER, $2, $3, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -366,7 +368,7 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 	}
 	| HEADERGEO STRING STRING STRING STRING	{
 #ifdef GEOIP2
-		$$ = create_cond_4(rs, COND_HEADERGEO, $2, $3, $4, $5, yylval.lineno);
+		$$ = create_cond_4(rs, COND_HEADERGEO, $2, $3, $4, $5, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -378,20 +380,20 @@ term	: COMPARE_CAPTURES STRING STRING STRING STRING	{
 #endif
 	}
 	| MACRO STRING STRING	{
-		$$ = create_cond(rs, COND_MACRO, $2, $3, yylval.lineno);
+		$$ = create_cond(rs, COND_MACRO, $2, $3, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 		free($3);
 	}
 	| BODY STRING		{
-		$$ = create_cond(rs, COND_BODY, $2, NULL, yylval.lineno);
+		$$ = create_cond(rs, COND_BODY, $2, NULL, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
 	}
 	| PHASEDONE STRING	{
-		$$ = create_cond(rs, COND_PHASEDONE, $2, NULL, yylval.lineno);
+		$$ = create_cond(rs, COND_PHASEDONE, $2, NULL, yylval.lineno, yylval.colno);
 		if ($$ == NULL)
 			YYERROR;
 		free($2);
@@ -421,7 +423,7 @@ yyerror(const char *fmt, ...)
 	if (err_str == NULL || err_len <= 0)
 		return (0);
 	va_start(ap, fmt);
-	snprintf(err_str, err_len, "%s:%d: ", infile, yylval.lineno);
+	snprintf(err_str, err_len, "%s:%d@%d: ", infile, yylval.lineno, yylval.colno);
 	vsnprintf(err_str + strlen(err_str), err_len - strlen(err_str),
 	    fmt, ap);
 	va_end(ap);
@@ -537,6 +539,10 @@ lgetc(FILE *f_in)
 
 restart:
 	c = getc(f_in);
+	if (c == '\n')
+		colno = 0;
+	else
+		++colno;
 	if (c == '\\') {
 		next = getc(f_in);
 		if (next != '\n') {
@@ -545,6 +551,7 @@ restart:
 		}
 		yylval.lineno = lineno;
 		lineno++;
+		colno = 0;
 		goto restart;
 	}
 	return (c);
@@ -553,6 +560,7 @@ restart:
 static int
 lungetc(int c, FILE *f_in)
 {
+	--colno;
 	return ungetc(c, f_in);
 }
 
@@ -594,6 +602,7 @@ top:
 	if (isalpha(c)) {
 		char buf[8192], *p = buf;
 		int token;
+		int token_colno = colno;
 
 		do {
 			*p++ = c;
@@ -613,6 +622,7 @@ top:
 				return (ERROR);
 			}
 		}
+		yylval.colno = token_colno;
 		return (token);
 	}
 
@@ -682,6 +692,7 @@ parse_ruleset(const char *f, struct ruleset **r, char *err, size_t len)
 		return (1);
 	}
 	lineno = 1;
+	colno = 0;
 	errors = 0;
 	yyparse();
 	fclose(fin);
