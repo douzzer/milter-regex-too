@@ -342,13 +342,20 @@ static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 static int build_res_report(struct context *context) {
 	if (context->res_report)
 		return 0;
-	context->res_report = (char *)malloc(context->rs->maxidx + 1);
+	context->res_report = (char *)malloc(context->rs->maxidx + 6);
 	if (! context->res_report)
 		return -1;
 	else {
 		char *crbp = context->res_report;
 		int thischar = 0;
 		int thisbit = 0;
+
+		*crbp++ = base64_chars[context->rs->cond_hash & 0x3f];
+		*crbp++ = base64_chars[(context->rs->cond_hash >> 6) & 0x3f];
+		*crbp++ = base64_chars[(context->rs->cond_hash >> 12) & 0x3f];
+		*crbp++ = base64_chars[(context->rs->cond_hash >> 18) & 0x3f];
+		*crbp++ = base64_chars[(context->rs->cond_hash >> 24) & 0x3f];
+
 		for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
 			for (struct cond_list *cl = context->rs->cond[cl_i];
 			     cl;
@@ -372,6 +379,23 @@ static int build_res_report(struct context *context) {
 static int res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_all_flag) {
 	int cond_n = 0;
 	int res_len = strlen(res_to_decode);
+
+	if (res_len < 5) {
+		printf("supplied res is too short.\n");
+		return -1;
+	}
+
+	if ((*res_to_decode++ != base64_chars[rs->cond_hash & 0x3f]) ||
+	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 6) & 0x3f]) ||
+	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 12) & 0x3f]) ||
+	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 18) & 0x3f]) ||
+	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 24) & 0x3f])) {
+		printf("supplied res does not match loaded config.\n");
+		return -1;
+	}
+
+	res_len -= 5;
+
 	for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
 		for (const struct cond_list *cl = rs->cond[cl_i];
 		     cl;
@@ -738,8 +762,35 @@ get_ruleset(void)
 				rs[new_cur] = 0;
 			}
 		} else {
+			unsigned int cond_hash = 0;
+
+			for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
+				for (struct cond_list *cl = rs[new_cur]->cond[cl_i];
+				     cl;
+				     cl = cl->next) {
+#define BROLL(x, b) x = (((x) << (b)) | ((x) >> ((sizeof(x) * 8U) - (b))))
+					cond_hash ^= (unsigned int)cl->cond->type;
+					BROLL(cond_hash, cond_hash & 0x1f);
+					for (unsigned int arg_i = 0; arg_i < sizeof cl->cond->args / sizeof cl->cond->args[0]; ++arg_i) {
+						if (cl->cond->args[arg_i].src) {
+							for (const char *cp = cl->cond->args[arg_i].src; *cp; ++cp) {
+								cond_hash ^= (unsigned int)*cp;
+								BROLL(cond_hash, cond_hash & 0x1f);
+							}
+						}
+					}
+				}
+			}
+			cond_hash ^= (cond_hash >> 30U);
+			rs[new_cur]->cond_hash = cond_hash;
+
 			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
-			    "successfully, mtime %lld", rule_file_name, (cur >= 0) ? "re" : "", (long long int)sbo.st_mtime);
+			    "successfully, mtime %lld, cond_hash %c%c%c%c%c", rule_file_name, (cur >= 0) ? "re" : "", (long long int)sbo.st_mtime,
+			    base64_chars[cond_hash & 0x3f],
+			    base64_chars[(cond_hash >> 6) & 0x3f],
+			    base64_chars[(cond_hash >> 12) & 0x3f],
+			    base64_chars[(cond_hash >> 18) & 0x3f],
+			    base64_chars[(cond_hash >> 24) & 0x3f]);
 			cur = new_cur;
 			loaded_ruleset_mtime = sbo.st_mtime;
 		}

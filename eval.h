@@ -150,6 +150,7 @@ struct action_list {
 };
 
 struct ruleset {
+	unsigned int		 cond_hash;
 	struct cond_list	*cond[COND_MAX];
 	struct action_list	*action;
 	unsigned		 maxidx;
