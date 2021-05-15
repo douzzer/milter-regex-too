@@ -45,6 +45,10 @@ override CFLAGS+=-std=gnu99 -O3 -g -MMD -DGITVERSION='"$(GITVERSION)"' $(GEOIP_C
 
 override LDFLAGS+=-L/usr/local/lib $(GMIME_LDFLAGS) $(PCRE2_LDFLAGS) $(GEOIP_LDFLAGS) $(BROKEN_LDFLAGS)
 
+sanitize: override CFLAGS+=-fsanitize=address -fsanitize=pointer-subtract -fsanitize=leak -fsanitize=undefined -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=bounds-strict -fno-sanitize-recover=all
+sanitize: override LDFLAGS+=-fsanitize=address -fsanitize=pointer-subtract -fsanitize=leak -fsanitize=undefined -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=bounds-strict -fno-sanitize-recover=all
+sanitize: all
+
 milter-regex-version.o: milter-regex.o eval.o $(GEOIP_OBJS) strlcat.o strlcpy.o parse.tab.o
 
 milter-regex-too: milter-regex-version.o milter-regex.o eval.o $(GEOIP_OBJS) strlcat.o strlcpy.o parse.tab.o

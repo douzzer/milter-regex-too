@@ -768,7 +768,7 @@ get_ruleset(void)
 				for (struct cond_list *cl = rs[new_cur]->cond[cl_i];
 				     cl;
 				     cl = cl->next) {
-#define BROLL(x, b) x = (((x) << (b)) | ((x) >> ((sizeof(x) * 8U) - (b))))
+#define BROLL(x, b) x = ((b) ? (((x) << (b)) | ((x) >> ((sizeof(x) * 8U) - (b)))) : (x))
 					cond_hash ^= (unsigned int)cl->cond->type;
 					BROLL(cond_hash, cond_hash & 0x1f);
 					for (unsigned int arg_i = 0; arg_i < sizeof cl->cond->args / sizeof cl->cond->args[0]; ++arg_i) {
