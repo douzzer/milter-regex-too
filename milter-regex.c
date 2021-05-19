@@ -679,12 +679,8 @@ get_ruleset(void)
 			rs[new_cur]->cond_hash = cond_hash;
 
 			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
-			    "successfully, mtime %lld, cond_hash %c%c%c%c%c", rule_file_name, (cur >= 0) ? "re" : "", (long long int)sbo.st_mtime,
-			    BASE64_CHAR(cond_hash),
-			    BASE64_CHAR(cond_hash >> 6),
-			    BASE64_CHAR(cond_hash >> 12),
-			    BASE64_CHAR(cond_hash >> 18),
-			    BASE64_CHAR(cond_hash >> 24));
+			    "successfully, mtime %lld, cond_hash " COND_HASH_FMT, rule_file_name, (cur >= 0) ? "re" : "", (long long int)sbo.st_mtime,
+			    COND_HASH_ARGS(cond_hash));
 			cur = new_cur;
 			loaded_ruleset_mtime = sbo.st_mtime;
 		}
@@ -1480,9 +1476,10 @@ msg_1(int priority, struct context *context, const char *fmt, ...)
 			}
 		}
 		fprintf(stderr,"%s %lld %+lld.%03lld ms: %s\n", priorityname, created_at / 1000000LL, usecs_elapsed/1000LL, usecs_elapsed%1000LL, msgbuf);
-	} else if (starting_up && (priority <= LOG_NOTICE))
-		fprintf(stderr,"%s\n", msgbuf);
-	else
+	} else if (starting_up) {
+		if (priority <= LOG_NOTICE)
+			fprintf(stderr,"%s\n", msgbuf);
+	} else
 		syslog(priority, "%s", msgbuf);
 	va_end(ap);
 }
@@ -1523,6 +1520,7 @@ main(int argc, char **argv)
 	int exit_after_load_flag = 0;
 	char *res_to_decode = 0;
 	int decode_all_flag = 0;
+	unsigned int startup_cond_hash;
 
 	tzset();
 
@@ -1601,7 +1599,7 @@ main(int argc, char **argv)
 	  }
 	}
 
-	if (! debug)
+	if ((! debug) && (! exit_after_load_flag))
 		openlog("milter-regex", LOG_PID | LOG_NDELAY, LOG_MAIL);
 
 	if (!strncmp(oconn, "unix:", 5))
@@ -1669,6 +1667,7 @@ main(int argc, char **argv)
 	  struct ruleset *rs = get_ruleset();
 	  if (! rs)
 	    exit(1);
+	  startup_cond_hash = rs->cond_hash;
 	  release_ruleset(rs);
 	  if (exit_after_load_flag) {
 		  if (res_to_decode) {
@@ -1677,7 +1676,7 @@ main(int argc, char **argv)
 			  else
 				  exit(1);
 		  }
-		  printf("loaded %d conds and exprs\n",rs->maxidx);
+		  fprintf(stderr,"loaded %d conds and exprs\n",rs->maxidx);
 		  free_ruleset(rs);
 	  }
 	}
@@ -1691,7 +1690,7 @@ main(int argc, char **argv)
 #ifdef USE_GMIME
 		g_mime_shutdown();
 #endif
-		printf("Exiting after successful initialization.\n");
+		fprintf(stderr,"Exiting after successful initialization.\n");
 		exit(0);
 	}
 
@@ -1729,11 +1728,22 @@ main(int argc, char **argv)
 
 	starting_up = 0;
 
+	msg(LOG_INFO, NULL, "started: %s, %sconfig mtime %lld, cond_hash " COND_HASH_FMT,
+	    gitversion,
 #ifdef GEOIP2
-	msg(LOG_INFO, NULL, "started: %s, with GeoIP2 extensions", gitversion);
+	    "with GeoIP2 extensions, ",
 #else
-	msg(LOG_INFO, NULL, "started: %s", gitversion);
+	    "",
 #endif
+	    (long long int)sbo.st_mtime,
+	    COND_HASH_ARGS(startup_cond_hash));
+
+#ifdef GEOIP2
+	/* reopen the database to log the mtime. */
+	if ((! debug) && geoip2_db_path)
+		(void)geoip2_opendb(geoip2_db_path);
+#endif
+
 	r = smfi_main();
 	if (r != MI_SUCCESS)
 		msg(LOG_CRIT, NULL, "smfi_main: terminating due to error: %s",strerror(errno));

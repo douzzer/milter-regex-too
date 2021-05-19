@@ -180,6 +180,12 @@ int		 build_res_report(struct context *context);
 int		 res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_all_flag);
 extern const char base64_chars[];
 #define BASE64_CHAR(x) base64_chars[(x) & 0x3f]
+#define COND_HASH_FMT "%c%c%c%c%c"
+#define COND_HASH_ARGS(x) BASE64_CHAR((x)), \
+    BASE64_CHAR((x) >> 6),		    \
+    BASE64_CHAR((x) >> 12),		    \
+    BASE64_CHAR((x) >> 18),		    \
+    BASE64_CHAR((x) >> 24)
 
 struct kv_binding {
 	struct kv_binding *prev, *next;
