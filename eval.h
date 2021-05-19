@@ -175,6 +175,11 @@ struct action	*eval_cond(struct context *context, cond_t,
 struct action	*eval_end(struct context *context, cond_t);
 void		 eval_clear(struct context *context, cond_t);
 void		 free_ruleset(struct ruleset *);
+void		 unreverse_ruleset_linked_lists(struct ruleset *);
+int		 build_res_report(struct context *context);
+int		 res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_all_flag);
+extern const char base64_chars[];
+#define BASE64_CHAR(x) base64_chars[(x) & 0x3f]
 
 struct kv_binding {
 	struct kv_binding *prev, *next;

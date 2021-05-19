@@ -707,6 +707,7 @@ parse_ruleset(const char *f, struct ruleset **r, char *err, size_t len)
 		free_ruleset(rs);
 		return (1);
 	} else {
+		unreverse_ruleset_linked_lists(rs);
 		*r = rs;
 		return (0);
 	}

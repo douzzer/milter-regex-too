@@ -337,112 +337,6 @@ int geoip2_refresh_summary(struct context *context) {
 
 #endif /* GEOIP2 */
 
-static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static int build_res_report(struct context *context) {
-	if (context->res_report)
-		return 0;
-	context->res_report = (char *)malloc(context->rs->maxidx + 6);
-	if (! context->res_report)
-		return -1;
-	else {
-		char *crbp = context->res_report;
-		int thischar = 0;
-		int thisbit = 0;
-
-		*crbp++ = base64_chars[context->rs->cond_hash & 0x3f];
-		*crbp++ = base64_chars[(context->rs->cond_hash >> 6) & 0x3f];
-		*crbp++ = base64_chars[(context->rs->cond_hash >> 12) & 0x3f];
-		*crbp++ = base64_chars[(context->rs->cond_hash >> 18) & 0x3f];
-		*crbp++ = base64_chars[(context->rs->cond_hash >> 24) & 0x3f];
-
-		for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
-			for (struct cond_list *cl = context->rs->cond[cl_i];
-			     cl;
-			     cl = cl->next) {
-				if (context->res[cl->cond->idx] == VAL_TRUE)
-					thischar |= 1 << thisbit;
-				if (++thisbit == 6) {
-					*crbp++ = base64_chars[thischar];
-					thischar = 0;
-					thisbit = 0;
-				}
-			}
-		}
-		if (thisbit > 0)
-			*crbp++ = base64_chars[thischar];
-		*crbp = 0;
-		return 0;
-	}
-}
-
-static int res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_all_flag) {
-	int cond_n = 0;
-	int res_len = strlen(res_to_decode);
-
-	if (res_len < 5) {
-		printf("supplied res is too short.\n");
-		return -1;
-	}
-
-	if ((*res_to_decode++ != base64_chars[rs->cond_hash & 0x3f]) ||
-	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 6) & 0x3f]) ||
-	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 12) & 0x3f]) ||
-	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 18) & 0x3f]) ||
-	    (*res_to_decode++ != base64_chars[(rs->cond_hash >> 24) & 0x3f])) {
-		printf("supplied res does not match loaded config.\n");
-		return -1;
-	}
-
-	res_len -= 5;
-
-	for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
-		for (const struct cond_list *cl = rs->cond[cl_i];
-		     cl;
-		     cl = cl->next) {
-			int cond_byte_offset = cond_n / 6;
-			int cond_bit_offset = cond_n % 6;
-			if (cond_byte_offset >= res_len) {
-				printf("supplied res is too short for loaded config.\n");
-				return -1;
-			}
-			int decoded = res_to_decode[cond_byte_offset];
-			if ((decoded >= 'A') && (decoded <= 'Z'))
-				decoded -= 'A';
-			else if ((decoded >= 'a') && (decoded <= 'z'))
-				decoded -= ('a' - 26);
-			else if ((decoded >= '0') && (decoded <= '9'))
-				decoded -= ('0' - 52);
-			else if (decoded == '+')
-				decoded = 62;
-			else if (decoded == '/')
-				decoded = 63;
-			else {
-				printf("supplied res has non-base64 char #%d.\n", decoded);
-				return -1;
-			}
-			if (decode_all_flag || (decoded & (1 << cond_bit_offset))) {
-				printf("R=%d L%d C%d %s", decoded & (1 << cond_bit_offset) ? 1 : 0, cl->cond->lineno, cl->cond->colno, lookup_cond_name(cl->cond->type));
-				if (cl->cond->args[0].src)
-					printf(" %s", cl->cond->args[0].src);
-				if (cl->cond->args[1].src)
-					printf(" %s", cl->cond->args[1].src);
-				if (cl->cond->args[2].src)
-					printf(" %s", cl->cond->args[2].src);
-				if (cl->cond->args[3].src)
-					printf(" %s", cl->cond->args[3].src);
-				putchar('\n');
-			}
-			++cond_n;
-		}
-	}
-	if ((cond_n + 5) / 6 != res_len) {
-		printf("supplied res length is %d, but loaded config produces res length %d.\n", res_len, (cond_n + 5) / 6);
-		return -1;
-	} else
-		return 0;
-}
-
 static void
 setreply_lognotice(struct context *context) {
 	int lvl;
@@ -786,11 +680,11 @@ get_ruleset(void)
 
 			msg(LOG_INFO, NULL, "configuration file %s %sloaded "
 			    "successfully, mtime %lld, cond_hash %c%c%c%c%c", rule_file_name, (cur >= 0) ? "re" : "", (long long int)sbo.st_mtime,
-			    base64_chars[cond_hash & 0x3f],
-			    base64_chars[(cond_hash >> 6) & 0x3f],
-			    base64_chars[(cond_hash >> 12) & 0x3f],
-			    base64_chars[(cond_hash >> 18) & 0x3f],
-			    base64_chars[(cond_hash >> 24) & 0x3f]);
+			    BASE64_CHAR(cond_hash),
+			    BASE64_CHAR(cond_hash >> 6),
+			    BASE64_CHAR(cond_hash >> 12),
+			    BASE64_CHAR(cond_hash >> 18),
+			    BASE64_CHAR(cond_hash >> 24));
 			cur = new_cur;
 			loaded_ruleset_mtime = sbo.st_mtime;
 		}
