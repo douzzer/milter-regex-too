@@ -283,21 +283,21 @@ expr	: term			{
 		$$ = $1;
 	}
 	| expr AND expr	{
-		$$ = create_expr(rs, EXPR_AND, $1, $3);
+		$$ = create_expr(rs, EXPR_AND, $1, $3, yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_expr");
 			YYERROR;
 		}
 	}
 	| expr OR expr	{
-		$$ = create_expr(rs, EXPR_OR, $1, $3);
+		$$ = create_expr(rs, EXPR_OR, $1, $3, yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_expr");
 			YYERROR;
 		}
 	}
 	| NOT term		{
-		$$ = create_expr(rs, EXPR_NOT, $2, NULL);
+		$$ = create_expr(rs, EXPR_NOT, $2, NULL, yylval.lineno, yylval.colno);
 		if ($$ == NULL) {
 			yyerror("yyparse: create_expr");
 			YYERROR;

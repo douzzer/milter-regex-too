@@ -129,6 +129,8 @@ struct expr {
 	struct action		*action;
 	struct expr_list	*expr;
 	unsigned		 idx;
+	int			 lineno;
+	int			 colno;
 };
 
 struct expr_list {
@@ -167,7 +169,7 @@ struct expr	*create_cond(struct ruleset *, cond_t, const char *,
 extern struct expr *create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno);
 extern struct expr *create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno);
 struct expr	*create_expr(struct ruleset *, int, struct expr *,
-		    struct expr *);
+		    struct expr *, int lineno, int colno);
 struct action	*create_action(struct ruleset *, int, const char *, int lineno, int colno);
 struct context;
 struct action	*eval_cond(struct context *context, cond_t,

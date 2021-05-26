@@ -119,6 +119,23 @@ create_ruleset(void)
 	return (rs);
 }
 
+static void append_expr_to_list(struct expr_list *elc, struct expr_list **list) {
+	/* take the time to keep the exprs in order of appearance.  after
+	 * unreverse_ruleset_linked_lists(), evaluation will proceed in the
+	 * order designated by the config file.
+	 */
+	elc->next = NULL;
+	if (*list)	{
+		struct expr_list *elp = *list, *el = elp->next;
+		while (el) {
+			elp = el;
+			el = el->next;
+		}
+		elp->next = elc;
+	} else
+		*list = elc;
+}
+
 struct expr *
 create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno)
 {
@@ -131,6 +148,10 @@ create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, con
 	expr = calloc(1, sizeof(struct expr));
 	if (expr == NULL)
 		goto error;
+
+	expr->lineno = lineno;
+	expr->colno = colno;
+
 	elc = calloc(1, sizeof(struct expr_list));
 	if (elc == NULL)
 		goto error;
@@ -300,8 +321,7 @@ create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, con
 	expr->cond = cond;
 	expr->idx = rs->maxidx++;
 	elc->expr = expr;
-	elc->next = cond->expr;
-	cond->expr = elc;
+	append_expr_to_list(elc, &cond->expr);
 	eval_mutex_unlock();
 	return (expr);
 
@@ -347,7 +367,7 @@ create_capture(struct ruleset *rs, cond_t type, const char *a, const char *b, co
 }
 
 struct expr *
-create_expr(struct ruleset *rs, int type, struct expr *a, struct expr *b)
+create_expr(struct ruleset *rs, int type, struct expr *a, struct expr *b, int lineno, int colno)
 {
 	struct expr *e = NULL;
 	struct expr_list *ela = NULL, *elb = NULL;
@@ -356,6 +376,10 @@ create_expr(struct ruleset *rs, int type, struct expr *a, struct expr *b)
 	e = calloc(1, sizeof(struct expr));
 	if (e == NULL)
 		goto error;
+
+	e->lineno = lineno;
+	e->colno = colno;
+
 	if (a != NULL) {
 		ela = calloc(1, sizeof(struct expr_list));
 		if (ela == NULL)
@@ -371,14 +395,12 @@ create_expr(struct ruleset *rs, int type, struct expr *a, struct expr *b)
 	if (a != NULL) {
 		e->args[0] = a;
 		ela->expr = e;
-		ela->next = a->expr;
-		a->expr = ela;
+		append_expr_to_list(ela, &a->expr);
 	}
 	if (b != NULL) {
 		e->args[1] = b;
 		elb->expr = e;
-		elb->next = b->expr;
-		b->expr = elb;
+		append_expr_to_list(elb, &b->expr);
 	}
 	eval_mutex_unlock();
 	return (e);
