@@ -656,26 +656,7 @@ get_ruleset(void)
 				rs[new_cur] = 0;
 			}
 		} else {
-			unsigned int cond_hash = 0;
-
-			for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
-				for (struct cond_list *cl = rs[new_cur]->cond[cl_i];
-				     cl;
-				     cl = cl->next) {
-#define BROLL(x, b) x = ((b) ? (((x) << (b)) | ((x) >> ((sizeof(x) * 8U) - (b)))) : (x))
-					cond_hash ^= (unsigned int)cl->cond->type;
-					BROLL(cond_hash, cond_hash & 0x1f);
-					for (unsigned int arg_i = 0; arg_i < sizeof cl->cond->args / sizeof cl->cond->args[0]; ++arg_i) {
-						if (cl->cond->args[arg_i].src) {
-							for (const char *cp = cl->cond->args[arg_i].src; *cp; ++cp) {
-								cond_hash ^= (unsigned int)*cp;
-								BROLL(cond_hash, cond_hash & 0x1f);
-							}
-						}
-					}
-				}
-			}
-			cond_hash ^= (cond_hash >> 30U);
+			unsigned int cond_hash = compute_cond_hash(rs[new_cur]);
 			rs[new_cur]->cond_hash = cond_hash;
 
 			msg(LOG_INFO, NULL, "configuration file %s %sloaded "

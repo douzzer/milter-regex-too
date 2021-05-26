@@ -2129,6 +2129,38 @@ unreverse_ruleset_linked_lists(struct ruleset *rs)
 	eval_mutex_unlock();
 }
 
+unsigned int compute_cond_hash(struct ruleset *rs) {
+	unsigned int cond_hash = 0;
+	for (int cl_i = 0; cl_i < COND_MAX; ++cl_i) {
+		for (struct cond_list *cl = rs->cond[cl_i];
+		     cl;
+		     cl = cl->next) {
+		/* barrel roll, but always by at least one. */
+#define BROLL(x, b) x = (((b) & 0x1f) ? (((x) << ((b) & 0x1f)) | ((x) >> ((sizeof(x) * 8U) - ((b) & 0x1f)))) : (((x) << 1U) | ((x) >> ((sizeof(x) * 8U) - 1U))))
+			cond_hash ^= (unsigned int)cl->cond->type;
+			BROLL(cond_hash, cond_hash);
+			/* note, don't stir in line/column numbers -- -R reports them relative to the
+			 * newly supplied config file, and if the cond hash matches, then by definition,
+			 * file layout changes aren't semantically significant for purposes of -R.
+			 */
+			for (unsigned int arg_i = 0; arg_i < sizeof cl->cond->args / sizeof cl->cond->args[0]; ++arg_i) {
+				if (cl->cond->args[arg_i].src) {
+					for (const char *cp = cl->cond->args[arg_i].src; *cp; ++cp) {
+						cond_hash ^= (unsigned int)*cp;
+						BROLL(cond_hash, cond_hash);
+					}
+				}
+				BROLL(cond_hash, cond_hash); /* delineate the arguments. */
+			}
+		}
+	}
+	cond_hash ^= (cond_hash >> 30U); /* just in case, stir in the top 2 bits
+					  * to the bottom 2, since base64 will
+					  * discard the top 2.
+					  */
+	return cond_hash;
+}
+
 const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 int build_res_report(struct context *context) {

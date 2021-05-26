@@ -178,6 +178,7 @@ struct action	*eval_end(struct context *context, cond_t);
 void		 eval_clear(struct context *context, cond_t);
 void		 free_ruleset(struct ruleset *);
 void		 unreverse_ruleset_linked_lists(struct ruleset *);
+unsigned int	 compute_cond_hash(struct ruleset *rs);
 int		 build_res_report(struct context *context);
 int		 res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_all_flag);
 extern const char base64_chars[];
