@@ -861,7 +861,7 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
 
 	context->action_result = SMFIS_CONTINUE;
 
@@ -916,7 +916,7 @@ cb_helo(SMFICTX *ctx, char *arg)
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
 
 	return (SMFIS_CONTINUE);
 }
@@ -964,6 +964,7 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	    (context->last_phase_done != COND_HELO)) {
 		msg(LOG_DEBUG, context, "cleared cached action for repeat cb_envfrom()");
 		context->action = 0;
+fprintf(stderr,"bah, reset action, context->last_phase_done = %d\n",context->last_phase_done);
 	}
 
 	if (*args)
@@ -990,7 +991,7 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 
 	return (SMFIS_CONTINUE);
 }
@@ -1040,7 +1041,7 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action);
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 
 	return (SMFIS_CONTINUE);
 }
@@ -1139,23 +1140,23 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 #endif
 
 	if ((action = eval_cond(context, COND_CAPTURE_ONCE_HEADER, name, value)))
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ONCE_HEADER, action,
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
 					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
 
 	if ((action = eval_cond(context, COND_CAPTURE_ALL_HEADER, name, value)))
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ALL_HEADER, action,
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
 					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
 
 	if ((action = eval_cond(context, COND_COMPARE_HEADER,
 	    name, value)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_HEADER, action,
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
 					snprintf(context->end_eval_note, sizeof context->end_eval_note, "\"%s\"", name));
 
 	if (saved_a_header) {
 		if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 					NULL, NULL)) !=
 		    NULL)
-			SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action, strlcpy(context->end_eval_note, "Header-Captures", sizeof context->end_eval_note));
+			SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action, strlcpy(context->end_eval_note, "Header-Captures", sizeof context->end_eval_note));
 	}
 
 	return (SMFIS_CONTINUE);
@@ -1179,28 +1180,28 @@ cb_eoh(SMFICTX *ctx)
 		return SMFIS_CONTINUE;
 
 	if ((action = check_macros(ctx, context)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-M1", sizeof context->end_eval_note));
 
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_COMPARE_CAPTURES, action, strlcpy(context->end_eval_note, "EOH-Captures", sizeof context->end_eval_note));
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action, strlcpy(context->end_eval_note, "EOH-Captures", sizeof context->end_eval_note));
 
 	if ((action = eval_end(context, COND_MACRO)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note));
 
 	memset(context->buf, 0, sizeof(context->buf));
 	context->pos = 0;
 
 	if ((action = eval_end(context, COND_HEADER)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADER, action,
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-End", sizeof context->end_eval_note));
 
 #ifdef GEOIP2
 	if ((action = eval_end(context, COND_HEADERGEO)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HEADERGEO, action,
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-Geo", sizeof context->end_eval_note));
 #endif
 
@@ -1246,9 +1247,9 @@ cb_body(SMFICTX *ctx, u_char *chunk, size_t size)
 			if ((action = eval_cond(context, COND_BODY, context->buf, NULL)) != NULL)
 				SETREPLY_RETURN_IF_DONE(ctx, context, COND_BODY, action);
 			if ((action = eval_cond(context, COND_CAPTURE_ONCE_BODY, context->buf, NULL)))
-				SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ONCE_BODY, action);
+				SETREPLY_RETURN_IF_DONE(ctx, context, COND_BODY, action);
 			if ((action = eval_cond(context, COND_CAPTURE_ALL_BODY, context->buf, NULL)))
-				SETREPLY_RETURN_IF_DONE(ctx, context, COND_CAPTURE_ALL_BODY, action);
+				SETREPLY_RETURN_IF_DONE(ctx, context, COND_BODY, action);
 		} else
 			context->pos++;
 	}
@@ -1275,14 +1276,14 @@ cb_eom(SMFICTX *ctx)
 		context->body_start_offset = context->body_end_offset;
 		if ((action = eval_end(context, COND_BODY)) != NULL) {
 			strlcpy(context->end_eval_note, "EOM", sizeof context->end_eval_note);
-			(void)setreply(ctx, context, COND_BODY, action);
+			(void)setreply(ctx, context, COND_EOM, action);
 		}
 	}
 
 	if (! context->action) {
 		if ((action = eval_end(context, COND_COMPARE_CAPTURES)) != NULL) {
 			strlcpy(context->end_eval_note, "EOM-Captures", sizeof context->end_eval_note);
-			(void)setreply(ctx, context, COND_COMPARE_CAPTURES, action);
+			(void)setreply(ctx, context, COND_EOM, action);
 		}
 	}
 
@@ -1499,6 +1500,7 @@ main(int argc, char **argv)
 	sfsistat r = MI_FAILURE;
 	const char *ofile = NULL;
 	int exit_after_load_flag = 0;
+	int dontdaemonize = 0;
 	char *res_to_decode = 0;
 	int decode_all_flag = 0;
 	unsigned int startup_cond_hash;
@@ -1511,9 +1513,9 @@ main(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv,
 #ifdef GEOIP2
-		"c:dj:p:u:g:tR:Sr:"
+		"c:dj:p:u:g:tR:Sr:n"
 #else
-		"c:dj:p:u:tR:Sr:"
+		"c:dj:p:u:tR:Sr:n"
 #endif
 		)) != -1) {
 		switch (ch) {
@@ -1554,6 +1556,9 @@ main(int argc, char **argv)
 		  else
 		    pid_file = 0;
 		  break;
+		case 'n':
+			dontdaemonize = 1;
+			break;
 		default:
 			usage(argv[0]);
 		}
@@ -1691,7 +1696,7 @@ main(int argc, char **argv)
 	}
 
 	/* daemonize (detach from controlling terminal) */
-	if (!debug && daemon(0, 0)) {
+	if (!debug && !dontdaemonize && daemon(0, 0)) {
 		perror("daemon");
 		goto done;
 	}

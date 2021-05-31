@@ -761,7 +761,7 @@ static int get_envelope_member(struct context *context, const char *name, const 
 	if (! name)
 		return -EINVAL;
 
-#define CHECK_ENVELOPE(checkname, membername) if (! strcmp(name,checkname)) { *value = context->membername; *value_len = strnlen(context->membername, sizeof context->membername); return 0; }
+#define CHECK_ENVELOPE(checkname, membername) if (! strcmp(name,checkname)) { if (! *context->membername) { errno = EAGAIN; return -1; } *value = context->membername; *value_len = strnlen(context->membername, sizeof context->membername); return 0; }
 
 	switch(name[0]) {
 	case 'c':
@@ -1142,7 +1142,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		  const char *first_operand;
 		  size_t first_operand_len = 0;
 		  ssize_t first_operand_len_left = first_operand_preselection_len ? (ssize_t)first_operand_preselection_len : (ssize_t)strlen(first_operand_preselection);
-		  const char *first_operand_ptr = first_operand_preselection;
+		  const char *first_operand_ptr = first_operand_preselection, *last_used_first_operand_ptr = first_operand_preselection;
 
 		  const char *second_operand_preselection = second_operand_preselection_first;
 		  const struct kv_binding *second_operand_i = second_operand_i_first;
@@ -1157,7 +1157,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		      second_operand_preselection_len ?
 		      (ssize_t)second_operand_preselection_len :
 		      (ssize_t)strlen(second_operand_preselection);
-		    const char *second_operand_ptr = second_operand_preselection;
+		    const char *second_operand_ptr = second_operand_preselection, *last_used_second_operand_ptr = second_operand_preselection;
 
 /* 3 */
 		    if (c->args[1].compare_ordered_match_all_selections || c->args[3].compare_ordered_match_all_selections) {
@@ -1188,6 +1188,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			first_next_O_outer_capture:
 			  first_operand = 0;
 			  if ((first_operand_len_left > 0) && (first_operand_matches_left <= 0))  {
+			    last_used_first_operand_ptr = first_operand_ptr;
 			    int r = regexec(&c->args[1].re,
 					    first_operand_ptr,
 					    sizeof first_operand_matches / sizeof first_operand_matches[0],
@@ -1234,7 +1235,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			    ++first_operand_n_captures;
 
-			    first_operand = first_operand_preselection + first_operand_matches[first_operand_matches_i].rm_so;
+			    first_operand = last_used_first_operand_ptr + first_operand_matches[first_operand_matches_i].rm_so;
 			    first_operand_len = first_operand_matches[first_operand_matches_i].rm_eo - first_operand_matches[first_operand_matches_i].rm_so;
 
 			  } else if (first_operand_len_left > 0)
@@ -1244,7 +1245,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 		      get_second_O_operand:
 
-			if (! second_operand_len_left)
+			if ((! second_operand_len_left) && (! second_operand_matches_left))
 			  second_operand = 0;
 			else if (c->args[3].empty || (! c->args[3].src)) {
 			  second_operand = second_operand_preselection;
@@ -1255,6 +1256,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			second_next_O_outer_capture:
 			  second_operand = 0;
 			  if ((second_operand_len_left > 0) && (second_operand_matches_left <= 0))  {
+			    last_used_second_operand_ptr = second_operand_ptr;
 			    int r = regexec(&c->args[3].re,
 					    second_operand_ptr,
 					    sizeof second_operand_matches / sizeof second_operand_matches[0],
@@ -1301,7 +1303,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			    ++second_operand_n_captures;
 
-			    second_operand = second_operand_preselection + second_operand_matches[second_operand_matches_i].rm_so;
+			    second_operand = last_used_second_operand_ptr + second_operand_matches[second_operand_matches_i].rm_so;
 			    second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
 
 			  } else if (second_operand_len_left > 0)
@@ -1312,24 +1314,20 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		      compare_O_operands:
 
 			if ((! first_operand) && (! second_operand))
-			  continue;
-
-			if ((! first_operand) || (! second_operand)) {
+			  ;
+			else if ((! first_operand) || (! second_operand)) {
 			  mismatch_p = 1;
 			  break;
-			}
-
-			if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) != 0) {
+			} else if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) != 0) {
 			  mismatch_p = 1;
 			  break;
 			}
 			++n_matches_overall;
-
 		      } /* end 3 O */
-		      while ((first_operand_len_left > 0) ||
-			     (first_operand_matches_left > 0) ||
-			     (second_operand_len_left > 0) ||
-			     (second_operand_matches_left > 0));
+		      while (((first_operand_len_left > 0) ||
+			      (first_operand_matches_left > 0)) &&
+			     ((second_operand_len_left > 0) ||
+			      (second_operand_matches_left > 0)));
 
 		      if ((n_matches_overall > 0) &&
 			  (! mismatch_p) &&
@@ -1365,6 +1363,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			  } else {
 
 			    if (first_operand_matches_i == 0) {
+			      last_used_first_operand_ptr = first_operand_ptr;
 			      int r = regexec(&c->args[1].re,
 					      first_operand_ptr,
 					      sizeof first_operand_matches / sizeof first_operand_matches[0],
@@ -1404,7 +1403,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			    ++first_operand_n_captures;
 
-			    first_operand = first_operand_preselection + first_operand_matches[first_operand_matches_i].rm_so;
+			    first_operand = last_used_first_operand_ptr + first_operand_matches[first_operand_matches_i].rm_so;
 			    first_operand_len = first_operand_matches[first_operand_matches_i].rm_eo - first_operand_matches[first_operand_matches_i].rm_so;
 
 			  }
@@ -1431,6 +1430,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			      } else {
 
 				if (second_operand_matches_i == 0) {
+				  last_used_second_operand_ptr = second_operand_ptr;
 				  int r = regexec(&c->args[3].re,
 						  second_operand_ptr,
 						  sizeof second_operand_matches / sizeof second_operand_matches[0],
@@ -1469,7 +1469,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 				++second_operand_n_captures;
 
-				second_operand = second_operand_preselection + second_operand_matches[second_operand_matches_i].rm_so;
+				second_operand = last_used_second_operand_ptr + second_operand_matches[second_operand_matches_i].rm_so;
 				second_operand_len = second_operand_matches[second_operand_matches_i].rm_eo - second_operand_matches[second_operand_matches_i].rm_so;
 
 			      }
