@@ -120,9 +120,11 @@ create_ruleset(void)
 }
 
 static void append_expr_to_list(struct expr_list *elc, struct expr_list **list) {
-	/* take the time to keep the exprs in order of appearance.  after
-	 * unreverse_ruleset_linked_lists(), evaluation will proceed in the
+	/* use tail insert for exprs too, to keep context.res in order of config file appearance (modulo duplicates).  after
+	 * unreverse_ruleset_cond_list(), evaluation will proceed in the
 	 * order designated by the config file.
+	 *
+	 * actions have always been tail-inserted, and that is what drives the actual outcome of evaluation.
 	 */
 	elc->next = NULL;
 	if (*list)	{
@@ -2090,7 +2092,7 @@ free_ruleset(struct ruleset *rs)
 }
 
 void
-unreverse_ruleset_linked_lists(struct ruleset *rs)
+unreverse_ruleset_cond_list(struct ruleset *rs)
 {
 	int i;
 
@@ -2113,18 +2115,7 @@ unreverse_ruleset_linked_lists(struct ruleset *rs)
 		}
 	}
 
-	/* fixing the action list order doesn't have any visible effect, but it's quick and easy. */
-	{
-		struct action_list *al = rs->action, *alp = NULL;
-		while (al != NULL) {
-			struct action_list *aln = al->next;
-			al->next = alp;
-			alp = al;
-			if (aln == NULL)
-				rs->action = al;
-			al = aln;
-		}
-	}
+	/* actions were already tail-inserted. */
 
 	eval_mutex_unlock();
 }
