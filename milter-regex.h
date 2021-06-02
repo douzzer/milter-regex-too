@@ -27,6 +27,7 @@ struct context {
 	enum { MESSAGE_INPROGRESS=0, MESSAGE_ABORTED, MESSAGE_COMPLETED, MESSAGE_LOGGED } message_status;
 	struct ruleset	*rs;
 	int		*res;
+	struct action	*current_winning_action;
 	cond_t		*res_phase;
 	char		 buf[2048];	/* longer body lines are wrapped */
 	unsigned	 pos;		/* write position within buf */

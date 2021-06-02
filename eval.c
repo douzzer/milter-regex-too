@@ -469,7 +469,6 @@ eval_cond_1(struct context *context, cond_t type,
 	int *res = context->res;
 
 	struct cond_list *cl;
-	struct action_list *al;
 
 	int n_pushed = 0;
 	int initial_captures_change_count = context->captures_change_count;
@@ -489,12 +488,8 @@ again:
 		}
 	}
 
-	if (n_pushed > 0) {
-		for (al = rs->action; al != NULL; al = al->next) {
-			if (res[al->action->idx] == VAL_TRUE)
-				return (al->action);
-		}
-	}
+	if (context->current_winning_action)
+		return context->current_winning_action;
 
 	if ((type != COND_COMPARE_CAPTURES) &&
 	    (context->captures_change_count != initial_captures_change_count)) {
@@ -535,7 +530,6 @@ eval_end(struct context *context, cond_t type)
 	struct action *ret = &default_action;
 
 	struct cond_list *cl;
-	struct action_list *al;
 
 	int n_pushed = 0;
 
@@ -550,15 +544,11 @@ eval_end(struct context *context, cond_t type)
 		}
 	}
 
-	if (n_pushed > 0) {
-		for (al = rs->action; al != NULL; al = al->next) {
-			if (res[al->action->idx] == VAL_TRUE) {
-				eval_mutex_unlock();
-				if (debug)
-					context->eval_time_cum += now_usecs() - start_at;
-				return (al->action);
-			}
-		}
+	if (context->current_winning_action) {
+		eval_mutex_unlock();
+		if (debug)
+			context->eval_time_cum += now_usecs() - start_at;
+		return context->current_winning_action;
 	}
 
 #if 0
@@ -602,6 +592,8 @@ eval_clear(struct context *context, cond_t type)
 				push_cond_result(context, cl->cond, VAL_UNDEF);
 		}
 	}
+
+	context->current_winning_action = NULL;
 
 	for (struct action_list *al = rs->action; al != NULL; al = al->next) {
 		if (context->res[al->action->idx] != VAL_UNDEF) {
@@ -1741,7 +1733,17 @@ push_expr_result(struct context *context, struct expr *e, int val)
 	res[e->idx] = val;
 	if (e->action != NULL && val == VAL_TRUE) {
 		res[e->action->idx] = val;
+		if ((context->current_winning_action == NULL) || (e->action->idx < context->current_winning_action->idx))
+			context->current_winning_action = e->action;
 		context->res_phase[e->action->idx] = context->current_phase;
+
+		msg(LOG_DEBUG, context,
+		    "asserted action %s, idx %d, config L%d@%d, message phase %s",
+		    lookup_action_name(e->action->type),
+		    e->action->idx,
+		    e->action->lineno,
+		    e->action->colno,
+		    lookup_cond_name(context->current_phase));
 	}
 	for (el = e->expr; el != NULL; el = el->next) {
 		struct expr *p = el->expr;
