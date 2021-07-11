@@ -138,6 +138,8 @@ static void append_expr_to_list(struct expr_list *elc, struct expr_list **list) 
 		*list = elc;
 }
 
+static cond_t phase_of_envelope_member(const char *name);
+
 struct expr *
 create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, const char *c, const char *d, int lineno, int colno)
 {
@@ -265,8 +267,13 @@ create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, con
 				goto error;
 			if ((type == COND_CAPTURE_ONCE_HEADER) ||
 			    (type == COND_CAPTURE_ALL_HEADER) ||
-			    (type == COND_CAPTURE_MACRO) ||
-			    (type == COND_COMPARE_HEADER) ||
+			    (type == COND_CAPTURE_MACRO)) {
+				if (phase_of_envelope_member(c) != COND_NONE) {
+					yyerror("create_cond_4: variable name \"%s\" is reserved", c);
+					goto error;
+				}
+			} else
+			if ((type == COND_COMPARE_HEADER) ||
 			    (type == COND_COMPARE_CAPTURES)
 #ifdef GEOIP2
 			    || (type == COND_CAPTURE_ONCE_BODY_GEO) ||
@@ -298,7 +305,10 @@ create_cond_4(struct ruleset *rs, cond_t type, const char *a, const char *b, con
 			if ((type == COND_CAPTURE_ONCE_HEADER_GEO) ||
 			    (type == COND_CAPTURE_ALL_HEADER_GEO) ||
 			    (type == COND_CAPTURE_MACRO_GEO)) {
-				/* nothing to prepare. */
+				if (phase_of_envelope_member(d) != COND_NONE) {
+					yyerror("create_cond_4: variable name \"%s\" is reserved", d);
+					goto error;
+				}
 			} else
 #endif
 			{
@@ -544,22 +554,23 @@ eval_end(struct context *context, cond_t type)
 		}
 	}
 
+	if (type < COND_COMPARE_CAPTURES) {
+		for (cl = rs->cond[COND_COMPARE_CAPTURES]; cl != NULL; cl = cl->next) {
+			if ((cl->cond->end_phase == COND_NONE) || (cl->cond->end_phase > type))
+				continue;
+			if (res[cl->cond->idx] == VAL_UNDEF) {
+				push_cond_result(context, cl->cond, VAL_FALSE);
+				++n_pushed;
+			}
+		}
+	}
+
 	if (context->current_winning_action) {
 		eval_mutex_unlock();
 		if (debug)
 			context->eval_time_cum += now_usecs() - start_at;
 		return context->current_winning_action;
 	}
-
-#if 0
-	for (type = max; type < COND_MAX; ++type) {
-		if (type == COND_PHASEDONE)
-			continue;
-		for (cl = rs->cond[type]; cl != NULL; cl = cl->next)
-			if (res[cl->cond->idx] == VAL_UNDEF)
-				break;
-	}
-#endif
 
 	ret = eval_cond_1(context, COND_PHASEDONE, 0, 0);
 
@@ -808,6 +819,36 @@ static int get_envelope_member(struct context *context, const char *name, const 
 	default:
 		return -ENOENT;
 	}
+#undef CHECK_ENVELOPE
+}
+
+static cond_t phase_of_envelope_member(const char *name) {
+	if (! name)
+		return COND_NONE;
+
+#define CHECK_ENVELOPE(checkname, phase) if (! strcmp(name,checkname)) return (phase)
+
+	CHECK_ENVELOPE("client_resolve", COND_CONNECT);
+	CHECK_ENVELOPE("connect:hostname", COND_CONNECT);
+	CHECK_ENVELOPE("connect:address", COND_CONNECT);
+#ifdef GEOIP2
+	if (! strcmp(name,"connect:geoip"))
+		return COND_CONNECTGEO;
+#endif
+	CHECK_ENVELOPE("envfrom", COND_ENVFROM);
+	CHECK_ENVELOPE("envrcpt", COND_ENVRCPT);
+	CHECK_ENVELOPE("from", COND_HEADER);
+	CHECK_ENVELOPE("helo", COND_HELO);
+	if (! strncmp(name,"literal:",strlen("literal:")))
+		return COND_STATIC;
+	CHECK_ENVELOPE("message_id", COND_ENVFROM);
+	CHECK_ENVELOPE("my_name", COND_CONNECT);
+	CHECK_ENVELOPE("subject", COND_HEADER);
+	CHECK_ENVELOPE("tls_status", COND_HELO);
+	CHECK_ENVELOPE("to", COND_HEADER);
+
+	return COND_NONE;
+#undef CHECK_ENVELOPE
 }
 
 static int
@@ -2120,6 +2161,106 @@ unreverse_ruleset_cond_list(struct ruleset *rs)
 	/* actions were already tail-inserted. */
 
 	eval_mutex_unlock();
+}
+
+static cond_t
+end_phase_of_var(struct ruleset *rs, const char *var) {
+	cond_t ret = COND_NONE;
+	for (struct cond_list *cl = rs->cond[COND_CAPTURE_MACRO];
+	     cl;
+	     cl = cl->next) {
+		if (! strcmp(cl->cond->args[2].src, var)) {
+			cond_t macro_phase = get_phase_of_macro_by_re(&cl->cond->args[0].re);
+			if (ret < macro_phase)
+				ret = macro_phase;
+		}
+	}
+
+	if (ret < COND_BODY) {
+		for (struct cond_list *cl = rs->cond[COND_CAPTURE_ONCE_BODY];
+		     cl;
+		     cl = cl->next) {
+			if (! strcmp(cl->cond->args[2].src, var)) {
+				ret = COND_BODY;
+				break;
+			}
+		}
+	}
+
+	if (ret < COND_BODY) {
+		for (struct cond_list *cl = rs->cond[COND_CAPTURE_ALL_BODY];
+		     cl;
+		     cl = cl->next) {
+			if (! strcmp(cl->cond->args[2].src, var)) {
+				ret = COND_BODY;
+				break;
+			}
+		}
+	}
+
+	if (ret < COND_HEADER) {
+		for (struct cond_list *cl = rs->cond[COND_CAPTURE_ONCE_HEADER];
+		     cl;
+		     cl = cl->next) {
+			if (! strcmp(cl->cond->args[2].src, var)) {
+				ret = COND_HEADER;
+				break;
+			}
+		}
+	}
+
+	if (ret < COND_HEADER) {
+		for (struct cond_list *cl = rs->cond[COND_CAPTURE_ALL_HEADER];
+		     cl;
+		     cl = cl->next) {
+			if (! strcmp(cl->cond->args[2].src, var)) {
+				ret = COND_HEADER;
+				break;
+			}
+		}
+	}
+
+	if (ret == COND_NONE)
+		return phase_of_envelope_member(var);
+	else
+		return ret;
+}
+
+int
+calculate_end_phases_of_compare_captures(struct ruleset *rs, char *err_string, size_t err_string_len)
+{
+	struct cond_list *cl;
+
+	eval_mutex_lock();
+	if (rs == NULL || rs->refcnt) {
+		eval_mutex_unlock();
+		return 0;
+	}
+
+	for (cl = rs->cond[COND_COMPARE_CAPTURES]; cl != NULL; cl = cl->next) {
+		cond_t end_phase_left = end_phase_of_var(rs, cl->cond->args[0].src);
+		cond_t end_phase_right = end_phase_of_var(rs, cl->cond->args[2].src);
+
+		if (end_phase_left == COND_NONE) {
+			if (err_string && (err_string_len > 0))
+				snprintf(err_string, err_string_len, "unresolvable variable reference \"%s\" at L%d C%d.", cl->cond->args[0].src, cl->cond->lineno, cl->cond->colno);
+			return -1;
+		}
+
+		if (end_phase_right == COND_NONE) {
+			if (err_string && (err_string_len > 0))
+				snprintf(err_string, err_string_len, "unresolvable variable reference \"%s\" at L%d C%d.", cl->cond->args[2].src, cl->cond->lineno, cl->cond->colno);
+			return -1;
+		}
+
+		if (end_phase_left > end_phase_right)
+			cl->cond->end_phase = end_phase_left;
+		else
+			cl->cond->end_phase = end_phase_right;
+
+	}
+
+	return 0;
 }
 
 unsigned int compute_cond_hash(struct ruleset *rs) {

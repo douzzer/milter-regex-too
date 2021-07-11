@@ -703,6 +703,12 @@ parse_ruleset(const char *f, struct ruleset **r, char *err, size_t len)
 		free(macros);
 		macros = m;
 	}
+
+	if (! errors) {
+		if (calculate_end_phases_of_compare_captures(rs, err_str, err_len) < 0)
+			++errors;
+	}
+
 	if (errors) {
 		free_ruleset(rs);
 		return (1);

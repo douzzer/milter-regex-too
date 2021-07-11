@@ -80,6 +80,9 @@ size_t strlcpy(char *dst, const char *src, size_t siz);
 extern const char gitversion[];
 extern int debug;
 
+extern cond_t get_phase_of_macro(const char *name);
+extern cond_t get_phase_of_macro_by_re(regex_t *re);
+
 #ifdef GEOIP2
 extern const char *geoip2_db_path;
 struct MMDB_lookup_result_s;

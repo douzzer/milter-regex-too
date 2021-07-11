@@ -53,7 +53,7 @@ enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
  * MACRO, CONNECTGEO, HEADERGEO, and COMPARE_CAPTURES are not actual message phases,
  * and EOH and EOM are only message phases, and not actual conds.
  */
-typedef enum { COND_NONE=0, COND_CAPTURE_MACRO,
+typedef enum { COND_NONE=0, COND_STATIC, COND_CAPTURE_MACRO,
 #ifdef GEOIP2
 	       COND_CAPTURE_MACRO_GEO,
 #endif
@@ -84,6 +84,7 @@ struct expr;
 
 struct cond {
 	cond_t type; /* COND_MACRO...COND_MAX */
+	cond_t end_phase; /* if type==COND_COMPARE_CAPTURES, this records the phase at which the argument variables are complete. */
 	struct cond_arg {
 		char	*src;
 		unsigned int	 empty:1;
@@ -178,6 +179,7 @@ struct action	*eval_end(struct context *context, cond_t);
 void		 eval_clear(struct context *context, cond_t);
 void		 free_ruleset(struct ruleset *);
 void		 unreverse_ruleset_cond_list(struct ruleset *);
+int		 calculate_end_phases_of_compare_captures(struct ruleset *rs, char *err, size_t err_len);
 unsigned int	 compute_cond_hash(struct ruleset *rs);
 int		 build_res_report(struct context *context);
 int		 res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_all_flag);
