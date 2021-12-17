@@ -533,6 +533,7 @@ setreply(SMFICTX *ctx, struct context *context, int phase, const struct action *
 
 	context->action = action;
 	context->last_phase_done = phase;
+	context->action_phase = phase;
 	if (debug) {
 		struct timeval now;
 		(void)gettimeofday(&now,0);
@@ -997,6 +998,32 @@ cb_helo(SMFICTX *ctx, char *arg)
 	return (SMFIS_CONTINUE);
 }
 
+static void reset_context_for_new_envfrom(struct context *context) {
+	msg(LOG_DEBUG, context, "reset context for repeat cb_envfrom()");
+
+	context->message_status = MESSAGE_INPROGRESS;
+
+	if (context->action_phase >= COND_ENVFROM) {
+		context->action_phase = COND_NONE;
+		context->action = 0;
+		context->action_result = SMFIS_CONTINUE;
+		context->action_at = 0;
+	}
+
+	context->env_from[0] = 0;
+	context->env_rcpt[0] = 0;
+	context->hdr_from[0] = 0;
+	context->hdr_to[0] = 0;
+	context->hdr_subject[0] = 0;
+
+	free_kv_bindings(context, &context->captures, COND_ENVFROM);
+	/* note, no need to reset captures_change_count */
+
+	context->end_eval_note[0] = 0;
+	context->body_start_offset = 0;
+	context->body_end_offset = 0;
+}
+
 static sfsistat
 cb_envfrom(SMFICTX *ctx, char **args)
 {
@@ -1007,6 +1034,13 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		msg(LOG_ERR, NULL, "cb_envfrom: smfi_getpriv");
 		return (SMFIS_ACCEPT);
 	}
+
+	/* if this is another go-round with a new envfrom, clear out
+	 * any residual state that pivoted on a previous envfrom or
+	 * subsequent message attribute.
+	 */
+	if (context->current_phase > COND_ENVFROM)
+		reset_context_for_new_envfrom(context);
 
 	context->current_phase = COND_ENVFROM;
 
@@ -1025,26 +1059,10 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	geoip2_free_summary(context);
 #endif
 
-	if (*args != NULL)
+	if (*args) {
 		strlcpy(context->env_from, *args, sizeof(context->env_from));
-
-	/* if this is another go-round with a new envfrom, clear out
-	 * any residual action that pivoted on a previous envfrom or
-	 * subsequent message attribute.
-	 */
-	if (context->action &&
-	    (context->last_phase_done != COND_CONNECT) &&
-#ifdef GEOIP2
-	    (context->last_phase_done != COND_CONNECTGEO) &&
-#endif
-	    (context->last_phase_done != COND_HELO)) {
-		msg(LOG_DEBUG, context, "cleared cached action for repeat cb_envfrom()");
-		context->action = 0;
-fprintf(stderr,"bah, reset action, context->last_phase_done = %d\n",context->last_phase_done);
-	}
-
-	if (*args)
 		msg(LOG_DEBUG, context, "cb_envfrom('%s')", *args);
+	}
 
 	if (context->action)
 		return SMFIS_CONTINUE;
@@ -1268,7 +1286,7 @@ cb_eoh(SMFICTX *ctx)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note));
 
-	memset(context->buf, 0, sizeof(context->buf));
+	context->buf[0] =0;
 	context->pos = 0;
 
 	if ((action = eval_end(context, COND_HEADER)) != NULL)

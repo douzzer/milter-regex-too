@@ -29,8 +29,6 @@ struct context {
 	int		*res;
 	struct action	*current_winning_action;
 	cond_t		*res_phase;
-	char		 buf[2048];	/* longer body lines are wrapped */
-	unsigned	 pos;		/* write position within buf */
 	char		 my_name[128];
 	char		 client_resolve[16];
 	char		 tls_status[16];
@@ -51,6 +49,7 @@ struct context {
 	size_t		 body_end_offset;
 	cond_t		 current_phase;
 	cond_t		 last_phase_done;
+	cond_t		 action_phase;
 	const struct action *action;
 	sfsistat	 action_result;
 	long long int	 action_at;
@@ -62,6 +61,8 @@ struct context {
 	char *geoip2_result_summary;
 	struct MMDB_lookup_result_ll *geoip2_result_summary_cache_head;
 #endif
+	unsigned	 pos;		/* write position within buf */
+	char		 buf[2048];	/* longer body lines are wrapped */
 };
 
 extern void __attribute__((format(printf,3,4))) msg_1(int priority, struct context *context, const char *fmt, ...);
