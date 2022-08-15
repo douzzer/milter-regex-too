@@ -50,8 +50,13 @@ enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
  * CONNECT CONNECTGEO HELO ENVFROM ENVRCPT MACRO HEADER HEADERGEO EOH
  * BODY EOM COMPARE_CAPTURES.
  *
- * MACRO, CONNECTGEO, HEADERGEO, and COMPARE_CAPTURES are not actual message phases,
- * and EOH and EOM are only message phases, and not actual conds.
+ * MACRO, CONNECTGEO, HEADERGEO, and COMPARE_CAPTURES are not actual message
+ * phases, and EOH and EOM are only message phases, and not actual conds.
+ * however, sequence matters with these too, because of the inequality in
+ * eval_end() on cl->cond->end_phase to close out COND_COMPARE_CAPTURES as early
+ * as possible.  most notably, COND_MACRO needs to appear as late as possible,
+ * i.e. immediately before body-related conds, and in any case must appear after
+ * COND_EOH.
  */
 typedef enum { COND_NONE=0, COND_STATIC, COND_CAPTURE_MACRO,
 #ifdef GEOIP2
@@ -66,11 +71,12 @@ typedef enum { COND_NONE=0, COND_STATIC, COND_CAPTURE_MACRO,
 #ifdef GEOIP2
 	       COND_CAPTURE_ONCE_HEADER_GEO, COND_CAPTURE_ALL_HEADER_GEO,
 #endif
-	       COND_COMPARE_HEADER, COND_MACRO, COND_HEADER,
+	       COND_COMPARE_HEADER, COND_HEADER,
 #ifdef GEOIP2
 	       COND_HEADERGEO,
 #endif
-	       COND_EOH, COND_CAPTURE_ONCE_BODY, COND_CAPTURE_ALL_BODY,
+	       COND_EOH, COND_MACRO,
+	       COND_CAPTURE_ONCE_BODY, COND_CAPTURE_ALL_BODY,
 #ifdef GEOIP2
 	       COND_CAPTURE_ONCE_BODY_GEO, COND_CAPTURE_ALL_BODY_GEO,
 #endif

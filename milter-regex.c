@@ -1282,22 +1282,30 @@ cb_eoh(SMFICTX *ctx)
 	    NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action, strlcpy(context->end_eval_note, "EOH-Captures", sizeof context->end_eval_note));
 
+	if ((action = eval_end(context, COND_COMPARE_HEADER)) != NULL) {
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-CH", sizeof context->end_eval_note));
+	}
+
+	/* note COND_MACRO > COND_EOH, so eval_end(.. COND_MACRO) will close out any open compare_captures that don't depend on the body.
+	 * currently the only non-body capture that will stay open this late is macro "{AddressFilter_results_eoh}".
+	 */
 	if ((action = eval_end(context, COND_MACRO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note));
-
-	context->buf[0] =0;
-	context->pos = 0;
-
-	if ((action = eval_end(context, COND_HEADER)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
-					strlcpy(context->end_eval_note, "EOH-End", sizeof context->end_eval_note));
 
 #ifdef GEOIP2
 	if ((action = eval_end(context, COND_HEADERGEO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-Geo", sizeof context->end_eval_note));
 #endif
+
+	if ((action = eval_end(context, COND_HEADER)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-End", sizeof context->end_eval_note));
+
+	context->buf[0] = 0;
+	context->pos = 0;
 
 	return (SMFIS_CONTINUE);
 }
