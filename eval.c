@@ -1070,7 +1070,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			for (int i=1;;) {
 				if (matches[i].rm_so != -1) {
-					insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+					insert_kv_binding(context, c->args[2].src, b_ptr + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
 					++n_inserted;
 				}
 				if (i == 0)
@@ -1130,6 +1130,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		 * to collapse levels 3-6 into a single loop with the two operands
 		 * stepping forward in sync, so that all selections can be compared
 		 * in order.
+		 *
+		 * Complexity Scores
+		 * Score | ln-ct | nc-lns| file-name(line): proc-name
+		 * 2840     899     701   eval.c(801): check_cond
 		 */
 
 		const struct kv_binding *first_operand_i, *second_operand_i_first;
