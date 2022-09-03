@@ -918,7 +918,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			for (int i=1;;) {
 				if (matches[i].rm_so != -1) {
-					insert_kv_binding(context, c->args[2].src, b + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+					insert_kv_binding(context, c->args[2].src, b_ptr + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
 					++n_inserted;
 				}
 				if (i == 0)
@@ -988,7 +988,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			for (int i=1;;) {
 				if (matches[i].rm_so != -1) {
-					insert_kv_binding(context, c->args[1].src, a + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
+					insert_kv_binding(context, c->args[1].src, a_ptr + matches[i].rm_so, matches[i].rm_eo - matches[i].rm_so, &point);
 					++n_inserted;
 				}
 				if (i == 0)
@@ -1180,7 +1180,8 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 /* 1 */		{
 		  const char *first_operand;
 		  size_t first_operand_len = 0;
-		  ssize_t first_operand_len_left = first_operand_preselection_len ? (ssize_t)first_operand_preselection_len : (ssize_t)strlen(first_operand_preselection);
+		  ssize_t first_operand_len_left_outer = first_operand_preselection_len ? (ssize_t)first_operand_preselection_len : (ssize_t)strlen(first_operand_preselection);
+		  ssize_t first_operand_len_left = first_operand_len_left_outer;
 		  const char *first_operand_ptr = first_operand_preselection, *last_used_first_operand_ptr = first_operand_preselection;
 
 		  const char *second_operand_preselection = second_operand_preselection_first;
@@ -1379,6 +1380,10 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 /* end 3-6 'O' */
 
 		    } else /* any-matches-any */ {
+
+		      /* for any-matches-any, need to reset the first operand for each second operand iteration. */
+		      first_operand_len_left = first_operand_len_left_outer;
+		      first_operand_ptr = last_used_first_operand_ptr = first_operand_preselection;
 
 		      while (first_operand_len_left > 0)
 /* 3 !'O' */
