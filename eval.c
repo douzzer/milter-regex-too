@@ -770,6 +770,7 @@ static int get_envelope_member(struct context *context, const char *name, const 
 
 	switch(name[0]) {
 	case 'c':
+		CHECK_ENVELOPE("cc", hdr_cc);
 		CHECK_ENVELOPE("client_resolve", client_resolve);
 		CHECK_ENVELOPE("connect:hostname", host_name);
 		CHECK_ENVELOPE("connect:address", host_addr);
@@ -828,6 +829,7 @@ static cond_t phase_of_envelope_member(const char *name) {
 
 #define CHECK_ENVELOPE(checkname, phase) if (! strcmp(name,checkname)) return (phase)
 
+	CHECK_ENVELOPE("cc", COND_HEADER);
 	CHECK_ENVELOPE("client_resolve", COND_CONNECT);
 	CHECK_ENVELOPE("connect:hostname", COND_CONNECT);
 	CHECK_ENVELOPE("connect:address", COND_CONNECT);

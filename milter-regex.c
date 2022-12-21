@@ -1193,6 +1193,10 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 		strlcpy(context->hdr_to, value, sizeof(context->hdr_to));
 		zap_ctrls(context->hdr_to);
 		saved_a_header = 1;
+	} else if (!strcasecmp(name, "Cc")) {
+		strlcpy(context->hdr_cc, value, sizeof(context->hdr_cc));
+		zap_ctrls(context->hdr_cc);
+		saved_a_header = 1;
 	} else if (!strcasecmp(name, "Subject")) {
 		strlcpy(context->hdr_subject, value,
 		    sizeof(context->hdr_subject));
