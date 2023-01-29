@@ -19,8 +19,8 @@ ifdef NO_PCRE2
 	PCRE2_CFLAGS=
 	PCRE2_LDFLAGS=
 else
-	PCRE2_CFLAGS=-DUSE_PCRE2 $(shell PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --cflags libpcre2-posix)
-	PCRE2_LDFLAGS=$(shell PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --libs libpcre2-posix)
+	PCRE2_CFLAGS=-DUSE_PCRE2 $(shell PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --cflags libpcre2-posix libpcre2-8)
+	PCRE2_LDFLAGS=$(shell PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --libs libpcre2-posix libpcre2-8)
 endif
 
 ifdef NO_GEOIP

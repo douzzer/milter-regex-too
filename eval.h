@@ -93,6 +93,9 @@ struct cond {
 	cond_t end_phase; /* if type==COND_COMPARE_CAPTURES, this records the phase at which the argument variables are complete. */
 	struct cond_arg {
 		char	*src;
+#ifdef USE_PCRE2
+		int pcre2_options;
+#endif
 		unsigned int	 empty:1;
 		unsigned int	 not:1;
 		unsigned int	 global:1;

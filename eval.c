@@ -853,6 +853,110 @@ static cond_t phase_of_envelope_member(const char *name) {
 #undef CHECK_ENVELOPE
 }
 
+#ifdef USE_PCRE2
+
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
+#ifndef COMPILE_ERROR_BASE
+#define COMPILE_ERROR_BASE 100
+#endif
+
+/* cribbed from pcre2-10.42/src/pcre2posix.c.
+ *
+ * only changes are passing in a pre-initialized PCRE2 options register, and
+ * adding support for compile_extra_options.
+ */
+static int PCRE2_CALL_CONVENTION
+my_regexec(const regex_t *preg, const char *string, size_t nmatch,
+		 regmatch_t pmatch[], int eflags, int options)
+{
+  int rc, so, eo;
+  pcre2_match_data *md = (pcre2_match_data *)preg->re_match_data;
+
+  if (string == NULL) return REG_INVARG;
+
+  if ((eflags & REG_NOTBOL) != 0) options |= PCRE2_NOTBOL;
+  if ((eflags & REG_NOTEOL) != 0) options |= PCRE2_NOTEOL;
+  if ((eflags & REG_NOTEMPTY) != 0) options |= PCRE2_NOTEMPTY;
+
+  /* When REG_NOSUB was specified, or if no vector has been passed in which to
+     put captured strings, ensure that nmatch is zero. This will stop any attempt to
+     write to pmatch. */
+
+  if ((preg->re_cflags & REG_NOSUB) != 0 || pmatch == NULL) nmatch = 0;
+
+  /* REG_STARTEND is a BSD extension, to allow for non-NUL-terminated strings.
+     The man page from OS X says "REG_STARTEND affects only the location of the
+     string, not how it is matched". That is why the "so" value is used to bump the
+     start location rather than being passed as a PCRE2 "starting offset". */
+
+  if ((eflags & REG_STARTEND) != 0)
+    {
+      if (pmatch == NULL) return REG_INVARG;
+      so = pmatch[0].rm_so;
+      eo = pmatch[0].rm_eo;
+    }
+  else
+    {
+      so = 0;
+      eo = (int)strlen(string);
+    }
+
+  rc = pcre2_match((const pcre2_code *)preg->re_pcre2_code,
+		   (PCRE2_SPTR)string + so, (eo - so), 0, options, md, NULL);
+
+  /* Successful match */
+
+  if (rc >= 0)
+    {
+      size_t i;
+      PCRE2_SIZE *ovector = pcre2_get_ovector_pointer(md);
+      if ((size_t)rc > nmatch) rc = (int)nmatch;
+      for (i = 0; i < (size_t)rc; i++)
+	{
+	  pmatch[i].rm_so = (ovector[i*2] == PCRE2_UNSET)? -1 :
+	    (int)(ovector[i*2] + so);
+	  pmatch[i].rm_eo = (ovector[i*2+1] == PCRE2_UNSET)? -1 :
+	    (int)(ovector[i*2+1] + so);
+	}
+      for (; i < nmatch; i++) pmatch[i].rm_so = pmatch[i].rm_eo = -1;
+      return 0;
+    }
+
+  /* Unsuccessful match */
+
+  if (rc <= PCRE2_ERROR_UTF8_ERR1 && rc >= PCRE2_ERROR_UTF8_ERR21)
+    return REG_INVARG;
+
+  /* Most of these are events that won't occur during testing, so exclude them
+     from coverage. */
+
+  switch(rc)
+    {
+    case PCRE2_ERROR_HEAPLIMIT: return REG_ESPACE;
+    case PCRE2_ERROR_NOMATCH: return REG_NOMATCH;
+
+      /* LCOV_EXCL_START */
+    case PCRE2_ERROR_BADMODE: return REG_INVARG;
+    case PCRE2_ERROR_BADMAGIC: return REG_INVARG;
+    case PCRE2_ERROR_BADOPTION: return REG_INVARG;
+    case PCRE2_ERROR_BADUTFOFFSET: return REG_INVARG;
+    case PCRE2_ERROR_MATCHLIMIT: return REG_ESPACE;
+    case PCRE2_ERROR_NOMEMORY: return REG_ESPACE;
+    case PCRE2_ERROR_NULL: return REG_INVARG;
+    default: return REG_ASSERT;
+      /* LCOV_EXCL_STOP */
+    }
+}
+
+#define my_regexec(preg, string, nmatch, pmatch, eflags, pcre2_options) my_regexec(preg, string, nmatch, pmatch, eflags, pcre2_options)
+
+#else /* !USE_PCRE2 */
+
+#define my_regexec(preg, string, nmatch, pmatch, eflags, pcre2_options) regexec(preg, string, nmatch, pmatch, eflags)
+
+#endif /* USE_PCRE2 */
+
 static int
 check_cond(struct context *context, struct cond *c, const char *a, const char *b)
 {
@@ -866,7 +970,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		if (context->last_phase_done == COND_NONE)
 			return 1;
 		const char *last_phase_done = lookup_cond_name(context->last_phase_done);
-		int r = regexec(&c->args[0].re, last_phase_done, 0, NULL, 0);
+		int r = my_regexec(&c->args[0].re, last_phase_done, 0, NULL, 0, c->args[0].pcre2_options);
 		if (r && r != REG_NOMATCH) {
 			msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 			return -1;
@@ -887,7 +991,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		}
 
 		if (! c->args[0].empty) {
-			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+			int r = my_regexec(&c->args[0].re, a, 0, NULL, 0, c->args[0].pcre2_options);
 			if (r && r != REG_NOMATCH) {
 				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 				return -1;
@@ -909,7 +1013,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		int n_inserted = 0;
 
 		while (b_len_left > 0) {
-			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
+			int r = my_regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0, c->args[1].pcre2_options);
 			if (r) {
 				if (r != REG_NOMATCH) {
 					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
@@ -979,7 +1083,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		int n_inserted = 0;
 
 		while (a_len_left > 0) {
-			int r = regexec(&c->args[0].re, a_ptr, sizeof matches / sizeof matches[0], matches, (a_ptr != a) ? REG_NOTBOL : 0);
+			int r = my_regexec(&c->args[0].re, a_ptr, sizeof matches / sizeof matches[0], matches, (a_ptr != a) ? REG_NOTBOL : 0, c->args[0].pcre2_options);
 			if (r) {
 				if (r != REG_NOMATCH) {
 					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
@@ -1039,7 +1143,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			return 1;
 
 		if (! c->args[0].empty) {
-			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+			int r = my_regexec(&c->args[0].re, a, 0, NULL, 0, c->args[0].pcre2_options);
 			if (r && r != REG_NOMATCH) {
 				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 				return -1;
@@ -1061,7 +1165,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		int n_inserted = 0;
 
 		while (b_len_left > 0) {
-			int r = regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0);
+			int r = my_regexec(&c->args[1].re, b_ptr, sizeof matches / sizeof matches[0], matches, (b_ptr != b) ? REG_NOTBOL : 0, c->args[1].pcre2_options);
 			if (r) {
 				if (r != REG_NOMATCH) {
 					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
@@ -1148,7 +1252,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 				return -1;
 			}
 			if (! c->args[0].empty) {
-				int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+				int r = my_regexec(&c->args[0].re, a, 0, NULL, 0, c->args[0].pcre2_options);
 				if (r && r != REG_NOMATCH) {
 					msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 					return -1;
@@ -1231,11 +1335,12 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			  first_operand = 0;
 			  if ((first_operand_len_left > 0) && (first_operand_matches_left <= 0))  {
 			    last_used_first_operand_ptr = first_operand_ptr;
-			    int r = regexec(&c->args[1].re,
+			    int r = my_regexec(&c->args[1].re,
 					    first_operand_ptr,
 					    sizeof first_operand_matches / sizeof first_operand_matches[0],
 					    first_operand_matches,
-					    (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
+					    (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0,
+					    c->args[1].pcre2_options);
 			    if (r || (first_operand_matches[0].rm_so < 0)) {
 			      if (r != REG_NOMATCH) {
 				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
@@ -1299,11 +1404,12 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			  second_operand = 0;
 			  if ((second_operand_len_left > 0) && (second_operand_matches_left <= 0))  {
 			    last_used_second_operand_ptr = second_operand_ptr;
-			    int r = regexec(&c->args[3].re,
+			    int r = my_regexec(&c->args[3].re,
 					    second_operand_ptr,
 					    sizeof second_operand_matches / sizeof second_operand_matches[0],
 					    second_operand_matches,
-					    (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
+					    (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0,
+					    c->args[3].pcre2_options);
 			    if (r || (second_operand_matches[0].rm_eo < 0)) {
 			      if (r != REG_NOMATCH) {
 				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno, c->colno);
@@ -1410,11 +1516,12 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 			    if (first_operand_matches_i == 0) {
 			      last_used_first_operand_ptr = first_operand_ptr;
-			      int r = regexec(&c->args[1].re,
+			      int r = my_regexec(&c->args[1].re,
 					      first_operand_ptr,
 					      sizeof first_operand_matches / sizeof first_operand_matches[0],
 					      first_operand_matches,
-					      (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0);
+					      (first_operand_ptr != first_operand_preselection) ? REG_NOTBOL : 0,
+					      c->args[1].pcre2_options);
 			      if (r) {
 				if (r != REG_NOMATCH) {
 				  msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
@@ -1477,11 +1584,12 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 				if (second_operand_matches_i == 0) {
 				  last_used_second_operand_ptr = second_operand_ptr;
-				  int r = regexec(&c->args[3].re,
+				  int r = my_regexec(&c->args[3].re,
 						  second_operand_ptr,
 						  sizeof second_operand_matches / sizeof second_operand_matches[0],
 						  second_operand_matches,
-						  (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0);
+						  (second_operand_ptr != second_operand_preselection) ? REG_NOTBOL : 0,
+						  c->args[3].pcre2_options);
 				  if (r) {
 				    if (r != REG_NOMATCH) {
 				      msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[3].src, c->lineno, c->colno);
@@ -1586,7 +1694,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					continue;
 				memcpy(s_nulltermed,s,(size_t)s_len);
 				s_nulltermed[s_len] = 0;
-				int r = regexec(&c->args[1].re, s_nulltermed, 0, NULL, 0);
+				int r = my_regexec(&c->args[1].re, s_nulltermed, 0, NULL, 0, c->args[1].pcre2_options);
 				if (r && r != REG_NOMATCH)
 					matched = -1;
 				else if ((r == REG_NOMATCH) == c->args[1].not)
@@ -1630,7 +1738,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 		}
 
 		if (! c->args[0].empty) {
-			int r = regexec(&c->args[0].re, a, 0, NULL, 0);
+			int r = my_regexec(&c->args[0].re, a, 0, NULL, 0, c->args[0].pcre2_options);
 			if (r && r != REG_NOMATCH) {
 				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[0].src, c->lineno, c->colno);
 				return -1;
@@ -1646,7 +1754,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			char abuf[64];
 
 			while (b_len_left > 0) {
-				int r = regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0);
+				int r = my_regexec(&c->args[1].re, b_ptr, sizeof addr_matches / sizeof addr_matches[0], addr_matches, (b_ptr != b) ? REG_NOTBOL : 0, c->args[1].pcre2_options);
 				if (r) {
 					if (r != REG_NOMATCH) {
 						msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[1].src, c->lineno, c->colno);
@@ -1697,7 +1805,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 								continue;
 							memcpy(s_nulltermed,s,(size_t)s_len);
 							s_nulltermed[s_len] = 0;
-							r = regexec(&c->args[3].re, s_nulltermed, 0, NULL, 0);
+							r = my_regexec(&c->args[3].re, s_nulltermed, 0, NULL, 0, c->args[3].pcre2_options);
 							if (r && r != REG_NOMATCH)
 								matched = -1;
 							else if ((r == REG_NOMATCH) == c->args[3].not)
@@ -1759,7 +1867,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 					return -1;
 				}
 			}
-			r = regexec(&c->args[i].re, d, 0, NULL, 0);
+			r = my_regexec(&c->args[i].re, d, 0, NULL, 0, c->args[i].pcre2_options);
 			if (r && r != REG_NOMATCH) {
 				msg(LOG_WARNING, context, "regex error %d in %s@%d, for re \"%s\" at conf L%d@%d", r, __FILE__, __LINE__, c->args[i].src, c->lineno, c->colno);
 				return -1;
@@ -1866,15 +1974,138 @@ push_cond_result(struct context *context, struct cond *c, int val)
 	}
 }
 
+#ifdef USE_PCRE2
+
+/* cribbed from pcre2-10.42/src/pcre2posix.c.
+ *
+ * only changes are passing in a pre-initialized PCRE2 options register, and
+ * adding support for compile_extra_options.
+ */
+
+static const int eint1[] = {
+  0,           /* No error */
+  REG_EESCAPE, /* \ at end of pattern */
+  REG_EESCAPE, /* \c at end of pattern */
+  REG_EESCAPE, /* unrecognized character follows \ */
+  REG_BADBR,   /* numbers out of order in {} quantifier */
+  /* 5 */
+  REG_BADBR,   /* number too big in {} quantifier */
+  REG_EBRACK,  /* missing terminating ] for character class */
+  REG_ECTYPE,  /* invalid escape sequence in character class */
+  REG_ERANGE,  /* range out of order in character class */
+  REG_BADRPT,  /* nothing to repeat */
+  /* 10 */
+  REG_ASSERT,  /* internal error: unexpected repeat */
+  REG_BADPAT,  /* unrecognized character after (? or (?- */
+  REG_BADPAT,  /* POSIX named classes are supported only within a class */
+  REG_BADPAT,  /* POSIX collating elements are not supported */
+  REG_EPAREN,  /* missing ) */
+  /* 15 */
+  REG_ESUBREG, /* reference to non-existent subpattern */
+  REG_INVARG,  /* pattern passed as NULL */
+  REG_INVARG,  /* unknown compile-time option bit(s) */
+  REG_EPAREN,  /* missing ) after (?# comment */
+  REG_ESIZE,   /* parentheses nested too deeply */
+  /* 20 */
+  REG_ESIZE,   /* regular expression too large */
+  REG_ESPACE,  /* failed to get memory */
+  REG_EPAREN,  /* unmatched closing parenthesis */
+  REG_ASSERT   /* internal error: code overflow */
+  };
+
+static const int eint2[] = {
+  30, REG_ECTYPE,  /* unknown POSIX class name */
+  32, REG_INVARG,  /* this version of PCRE2 does not have Unicode support */
+  37, REG_EESCAPE, /* PCRE2 does not support \L, \l, \N{name}, \U, or \u */
+  56, REG_INVARG,  /* internal error: unknown newline setting */
+  92, REG_INVARG,  /* invalid option bits with PCRE2_LITERAL */
+  99, REG_EESCAPE  /* \K in lookaround */
+};
+
+static int PCRE2_CALL_CONVENTION
+my_regcomp(regex_t *preg, const char *pattern, int cflags, int options,
+		 uint32_t compile_extra_options)
+{
+  PCRE2_SIZE erroffset;
+  PCRE2_SIZE patlen;
+  int errorcode;
+  int re_nsub = 0;
+  pcre2_compile_context *ccontext = 0;
+
+  patlen = ((cflags & REG_PEND) != 0)? (PCRE2_SIZE)(preg->re_endp - pattern) :
+    PCRE2_ZERO_TERMINATED;
+
+  if ((cflags & REG_ICASE) != 0)    options |= PCRE2_CASELESS;
+  if ((cflags & REG_NEWLINE) != 0)  options |= PCRE2_MULTILINE;
+  if ((cflags & REG_DOTALL) != 0)   options |= PCRE2_DOTALL;
+  if ((cflags & REG_NOSPEC) != 0)   options |= PCRE2_LITERAL;
+  if ((cflags & REG_UTF) != 0)      options |= PCRE2_UTF;
+  if ((cflags & REG_UCP) != 0)      options |= PCRE2_UCP;
+  if ((cflags & REG_UNGREEDY) != 0) options |= PCRE2_UNGREEDY;
+
+  preg->re_cflags = cflags;
+
+  if (compile_extra_options) {
+    ccontext = pcre2_compile_context_create(NULL);
+    if (ccontext)
+      pcre2_set_compile_extra_options(ccontext, compile_extra_options);
+  }
+
+  preg->re_pcre2_code = pcre2_compile((PCRE2_SPTR)pattern, patlen, options,
+				      &errorcode, &erroffset, ccontext);
+
+  if (ccontext)
+    pcre2_compile_context_free(ccontext);
+
+  preg->re_erroffset = erroffset;
+
+  if (preg->re_pcre2_code == NULL)
+    {
+      unsigned int i;
+
+      /* A negative value is a UTF error; otherwise all error codes are greater
+	 than COMPILE_ERROR_BASE, but check, just in case. */
+
+      if (errorcode < COMPILE_ERROR_BASE) return REG_BADPAT;
+      errorcode -= COMPILE_ERROR_BASE;
+
+      if (errorcode < (int)(sizeof(eint1)/sizeof(const int)))
+	return eint1[errorcode];
+      for (i = 0; i < sizeof(eint2)/sizeof(const int); i += 2)
+	if (errorcode == eint2[i]) return eint2[i+1];
+      return REG_BADPAT;
+    }
+
+  (void)pcre2_pattern_info((const pcre2_code *)preg->re_pcre2_code,
+			   PCRE2_INFO_CAPTURECOUNT, &re_nsub);
+  preg->re_nsub = (size_t)re_nsub;
+  preg->re_match_data = pcre2_match_data_create(re_nsub + 1, NULL);
+  preg->re_erroffset = (size_t)(-1);  /* No meaning after successful compile */
+
+  if (preg->re_match_data == NULL)
+    {
+      /* LCOV_EXCL_START */
+      pcre2_code_free(preg->re_pcre2_code);
+      return REG_ESPACE;
+      /* LCOV_EXCL_STOP */
+    }
+
+  return 0;
+}
+
+#endif
+
 static int
 build_regex(struct cond_arg *a)
 {
 	char del;
 	const char *s = a->src, *t;
 #ifdef USE_PCRE2
-	int flags = REG_DOTALL; /* ". matches anything including NL" */
+	int flags = REG_DOTALL; /* ". matches anything including NL"  also set by (?s); same as Perl's /s */
+	int options = 0;
+	uint32_t compile_extra_options = 0;
 #else
-	int flags = REG_EXTENDED;
+	int flags = REG_EXTENDED; /* not the same as PCRE2_EXTENDED "most white space characters in the pattern are totally ignored", which can be reached in pcre2 by (?x) */
 #endif
 
 	a->empty = 1;
@@ -1908,14 +2139,199 @@ build_regex(struct cond_arg *a)
 		case 'e':
 			break;
 		case 'i':
-			flags |= REG_ICASE;
+			flags |= REG_ICASE; /* can be set in pcre2 via (?i); same as perl's /i */
 			break;
 		case 'n':
 			a->not = 1;
 			break;
 		case 'g':
-			a->global = 1;
+			a->global = 1; /* same as Perl's /g option */
 			break;
+
+		case 'M':
+			flags |= REG_NEWLINE /* PCRE2_MULTILINE */; /* also possible in pcre2 via (?m); same as Perl's /m */
+			break;
+
+		case 'N':
+			flags |= REG_NOSPEC /* PCRE2_LITERAL */;
+			break;
+
+#ifdef USE_PCRE2
+		case 'A':
+			flags &= ~REG_DOTALL /* !PCRE2_DOTALL */;
+			break;
+
+		case 'u':
+			flags |= REG_UTF /* PCRE2_UTF "Treat pattern and subjects as UTF strings" */;
+			break;
+
+		case 'v':
+			options |= PCRE2_NEVER_UTF; /* "prevents the creator of the pattern from switching to UTF interpretation by starting the pattern with (*UTF)" */
+			break;
+
+		case 'U':
+			flags |= REG_UCP /* PCRE2_UCP "Use Unicode properties for \d, \w, etc." */;
+			break;
+
+	/* handling for fully PCRE2-native options: */
+
+		case 'V':
+			options |= PCRE2_NEVER_UCP; /* "prevents the creator of the pattern from enabling this facility by starting the pattern with (*UCP)" */
+			break;
+
+		case 'G':
+			flags |= REG_UNGREEDY /* PCRE2_UNGREEDY "Invert greediness of quantifiers" -- also possible in pcre2 via (?U) */;
+			break;
+
+		case 'E':
+			flags |= REG_NOTEMPTY /* PCRE2_NOTEMPTY "An empty string is not a valid match" */;
+			break;
+
+		case 'a':
+			options |= PCRE2_ANCHORED; /* can also be accomplished with \A at start of re */
+			break;
+
+		case 'z':
+			options |= PCRE2_ENDANCHORED; /* can also be accomplished with \z at end of re */
+			break;
+
+		case 'y':
+			options |= PCRE2_MATCH_INVALID_UTF; /* "enables support for matching by pcre2_match() in subject strings that contain invalid UTF sequences." */
+			break;
+
+		case 'X':
+			options |= PCRE2_EXTENDED; /* can be set with (?x); same as Perl's /x */
+
+                        /* PCRE2_EXTENDED_MORE can be set with (?xx); same as Perl's /xx */
+
+			break;
+
+		case '^':
+			options |= PCRE2_ALT_CIRCUMFLEX; /* "If you want a multiline circumflex also to match after a terminating newline, you must set PCRE2_ALT_CIRCUMFLEX." */
+			break;
+
+		case '$':
+			options |= PCRE2_DOLLAR_ENDONLY; /* "a dollar metacharacter in the pattern matches only at the end of the subject" */
+			break;
+
+
+		case 'f':
+			options |= PCRE2_FIRSTLINE; /* "the start of an unanchored pattern match must be before or at the first newline in the subject string following the start of matching" */
+			break;
+
+		case 'C':
+			options |= PCRE2_NO_AUTO_CAPTURE; /* same as Perl's /n option */
+			break;
+
+		case 'd':
+			options |= PCRE2_DUPNAMES; /* "names used to identify capture groups need not be unique." */
+			break;
+
+		case 'r':
+			options |= PCRE2_MATCH_UNSET_BACKREF; /* "a backreference to an unset capture group matches an empty string [...] makes PCRE2 behave more like ECMAscript (aka JavaScript)" */
+			break;
+
+		case 'c':
+			options |= PCRE2_NEVER_BACKSLASH_C; /* "locks out the use of \C in the pattern that is being compiled.
+							     * This escape can cause unpredictable behaviour in UTF-8 or UTF-16 modes,
+							     * because it may leave the current matching point in the middle of a
+							     * multi-code-unit character.
+							     */
+			break;
+
+		case 'w':
+			compile_extra_options |= PCRE2_EXTRA_MATCH_WORD; /* "This option is provided for use by the -w option of pcre2grep. It causes the pattern only to match
+									  * strings  that have a word boundary at the start and the end. [...] The option
+									  * may be used with PCRE2_LITERAL. However, it is ignored if PCRE2_EXTRA_MATCH_LINE is also set.
+									  */
+			break;
+
+		case 'x':
+			compile_extra_options |= PCRE2_EXTRA_MATCH_LINE; /* This option is provided for use by the -x option of pcre2grep. It causes the pattern only to match
+									  * complete lines. [...] This option can be used with PCRE2_LITERAL.
+									  */
+			break;
+
+		case 'j':
+			compile_extra_options |= PCRE2_EXTRA_ALT_BSUX; /* "has the effect of PCRE2_ALT_BSUX, but in addition it recognizes \u{hhh..}
+									* as a hexadecimal character code, where hhh.. is any number of hexadecimal digits."
+									*/
+			break;
+
+		/* additional pcre2 flags not currently relevant to milter-regex use case:
+		 *
+		 * PCRE2_NO_UTF_CHECK "When it is set, the effect of passing an invalid UTF string as
+		 *    a pattern is undefined. It may cause your program to crash or loop."
+		 *
+		 * PCRE2_ALLOW_EMPTY_CLASS "a closing square bracket that immediately follows an
+		 *    opening one [...] terminates the class, which therefore contains no characters
+		 *    and so can never match."
+		 *
+		 * PCRE2_ALT_BSUX "request alternative handling of three escape sequences, which
+		 *    makes PCRE2's behaviour more like ECMAscript (aka JavaScript)"
+		 *
+		 * PCRE2_AUTO_CALLOUT "pcre2_compile() automatically inserts callout items, all with
+		 *    number 255, before each pattern item"
+		 *
+		 * PCRE2_NO_AUTO_POSSESS "do a full unoptimized search and run all the callouts"
+		 *
+		 * PCRE2_NO_DOTSTAR_ANCHOR "disables an optimization [... which] can cause callouts
+		 *    to be skipped."
+		 *
+		 * PCRE2_NO_START_OPTIMIZE "disables the start-up optimizations [...] ensuring that
+		 *    in cases where the result is "no match", the callouts do occur"
+		 *
+		 * PCRE2_ALT_VERBNAMES "normal backslash processing is applied to verb names and
+		 *    only an unescaped closing parenthesis terminates the name."
+		 *
+		 * PCRE2_USE_OFFSET_LIMIT "must be set for pcre2_compile() if
+		 *    pcre2_set_offset_limit() is going to be used to set a non-default offset limit
+		 *    in a match context for matches that use this pattern."
+		 *
+		 * and additional irrelevant compile_extra_options:
+		 *
+		 * PCRE2_EXTRA_ALLOW_SURROGATE_ESCAPES "surrogate code point values in UTF-8 and
+		 *    UTF-32 patterns no longer provoke errors and are incorporated in the compiled
+		 *    pattern. However, they can only match subject characters if the matching
+		 *    function is called with PCRE2_NO_UTF_CHECK set."
+		 *
+		 * PCRE2_EXTRA_BAD_ESCAPE_IS_LITERAL "This is a dangerous option. [...] all
+		 *    unrecognized  or malformed escape sequences are treated as single-character
+		 *    escapes."
+		 *
+		 * PCRE2_EXTRA_ESCAPED_CR_IS_LF "\r in a pattern is converted to \n so that it
+		 *    matches a LF (linefeed)"
+		 *
+		 * PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK "This option is provided to re-enable [...] the
+		 *    use of \K within lookaround assertions [...] (act in positive lookarounds,
+		 *    ignore in negative ones)"
+		 */
+
+#else
+		case 'A':
+		case 'u':
+		case 'v':
+		case 'U':
+		case 'V':
+		case 'G':
+		case 'E':
+		case 'a':
+		case 'z':
+		case 'y':
+		case 'X':
+		case '^':
+		case '$':
+		case 'f':
+		case 'C':
+		case 'd':
+		case 'r':
+		case 'c':
+		case 'w':
+		case 'x':
+		case 'j':
+			yyerror("regex flag %s used but only allowed when USE_PCRE2, in %s", *flags_i, a->src);
+			return (1);
+#endif
 
 		case 'p':
 			a->compare_as_prefix = 1;
@@ -2000,7 +2416,12 @@ build_regex(struct cond_arg *a)
 		u[s - t] = 0;
 #endif
 		s++;
+#ifdef USE_PCRE2
+		a->pcre2_options = options;
+		r = my_regcomp(&a->re, u, flags, options, compile_extra_options);
+#else
 		r = regcomp(&a->re, u, flags);
+#endif
 		if (r) {
 			char e[8192];
 
