@@ -1724,7 +1724,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	if (user) {
+	if (user && (! res_to_decode)) {
 		struct passwd *pw;
 
 		errno = 0;
