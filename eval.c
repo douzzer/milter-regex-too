@@ -863,15 +863,16 @@ static cond_t phase_of_envelope_member(const char *name) {
 
 /* cribbed from pcre2-10.42/src/pcre2posix.c.
  *
- * only changes are passing in a pre-initialized PCRE2 options register, and
- * adding support for compile_extra_options.
+ * only changes are passing in a pre-initialized PCRE2 options register, adding
+ * support for compile_extra_options, and fixing md to be a threadsafe
+ * allocation in my_regexec().
  */
 static int PCRE2_CALL_CONVENTION
 my_regexec(const regex_t *preg, const char *string, size_t nmatch,
 		 regmatch_t pmatch[], int eflags, int options)
 {
   int rc, so, eo;
-  pcre2_match_data *md = (pcre2_match_data *)preg->re_match_data;
+  pcre2_match_data *md;
 
   if (string == NULL) return REG_INVARG;
 
@@ -902,6 +903,9 @@ my_regexec(const regex_t *preg, const char *string, size_t nmatch,
       eo = (int)strlen(string);
     }
 
+  md = pcre2_match_data_create((uint32_t)nmatch, NULL /* pcre2_general_context *gcontext */);
+  if (md == NULL) return REG_ESPACE;
+
   rc = pcre2_match((const pcre2_code *)preg->re_pcre2_code,
 		   (PCRE2_SPTR)string + so, (eo - so), 0, options, md, NULL);
 
@@ -919,11 +923,16 @@ my_regexec(const regex_t *preg, const char *string, size_t nmatch,
 	  pmatch[i].rm_eo = (ovector[i*2+1] == PCRE2_UNSET)? -1 :
 	    (int)(ovector[i*2+1] + so);
 	}
+
+      pcre2_match_data_free(md);
+
       for (; i < nmatch; i++) pmatch[i].rm_so = pmatch[i].rm_eo = -1;
       return 0;
     }
 
   /* Unsuccessful match */
+
+  pcre2_match_data_free(md);
 
   if (rc <= PCRE2_ERROR_UTF8_ERR1 && rc >= PCRE2_ERROR_UTF8_ERR21)
     return REG_INVARG;
