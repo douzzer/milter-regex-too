@@ -1286,17 +1286,47 @@ cb_eoh(SMFICTX *ctx)
 	    NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action, strlcpy(context->end_eval_note, "EOH-Captures", sizeof context->end_eval_note));
 
-	if ((action = eval_end(context, COND_COMPARE_HEADER)) != NULL) {
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
-					strlcpy(context->end_eval_note, "EOH-CH", sizeof context->end_eval_note));
-	}
-
-	/* note COND_MACRO > COND_EOH, so eval_end(.. COND_MACRO) will close out any open compare_captures that don't depend on the body.
-	 * currently the only non-body capture that will stay open this late is macro "{AddressFilter_results_eoh}".
+	/* headers are done -- a whole slew of conds and pseudo-conds can be closed out now, before we advance to the message body.
+	 * closing out the COND_CAPTURE_* pseudo-conds is just for debugging clarity, since the cond.end_phase mechanism assures
+	 * the dependent conds are opportunistically closed out as early as possible.
 	 */
+
+	if ((action = eval_end(context, COND_CAPTURE_MACRO)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-Capt-M", sizeof context->end_eval_note));
+
+#ifdef GEOIP2
+	if ((action = eval_end(context, COND_CAPTURE_MACRO_GEO)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-Capt-M-Geo", sizeof context->end_eval_note));
+#endif
+
 	if ((action = eval_end(context, COND_MACRO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
 					strlcpy(context->end_eval_note, "EOH-M2", sizeof context->end_eval_note));
+
+	if ((action = eval_end(context, COND_CAPTURE_ONCE_HEADER)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-Capt-1-H", sizeof context->end_eval_note));
+
+	if ((action = eval_end(context, COND_CAPTURE_ALL_HEADER)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-Capt-A-H", sizeof context->end_eval_note));
+
+#ifdef GEOIP2
+	if ((action = eval_end(context, COND_CAPTURE_ONCE_HEADER_GEO)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-Capt-1-H-Geo", sizeof context->end_eval_note));
+
+	if ((action = eval_end(context, COND_CAPTURE_ALL_HEADER_GEO)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-Capt-A-H-Geo", sizeof context->end_eval_note));
+#endif
+
+	if ((action = eval_end(context, COND_COMPARE_HEADER)) != NULL) {
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_EOH, action,
+					strlcpy(context->end_eval_note, "EOH-C-H", sizeof context->end_eval_note));
+	}
 
 #ifdef GEOIP2
 	if ((action = eval_end(context, COND_HEADERGEO)) != NULL)
@@ -1378,10 +1408,19 @@ cb_eom(SMFICTX *ctx)
 
 	context->message_status = MESSAGE_COMPLETED;
 
-	if (! context->action) {
+	if (! context->action)
 		context->body_start_offset = context->body_end_offset;
-		if ((action = eval_end(context, COND_BODY)) != NULL) {
-			strlcpy(context->end_eval_note, "EOM", sizeof context->end_eval_note);
+
+	if (! context->action) {
+		if ((action = eval_end(context, COND_CAPTURE_ONCE_BODY)) != NULL) {
+			strlcpy(context->end_eval_note, "EOM-Cap-1", sizeof context->end_eval_note);
+			(void)setreply(ctx, context, COND_EOM, action);
+		}
+	}
+
+	if (! context->action) {
+		if ((action = eval_end(context, COND_CAPTURE_ALL_BODY)) != NULL) {
+			strlcpy(context->end_eval_note, "EOM-Cap-A", sizeof context->end_eval_note);
 			(void)setreply(ctx, context, COND_EOM, action);
 		}
 	}
@@ -1389,6 +1428,13 @@ cb_eom(SMFICTX *ctx)
 	if (! context->action) {
 		if ((action = eval_end(context, COND_COMPARE_CAPTURES)) != NULL) {
 			strlcpy(context->end_eval_note, "EOM-Captures", sizeof context->end_eval_note);
+			(void)setreply(ctx, context, COND_EOM, action);
+		}
+	}
+
+	if (! context->action) {
+		if ((action = eval_end(context, COND_BODY)) != NULL) {
+			strlcpy(context->end_eval_note, "EOM", sizeof context->end_eval_note);
 			(void)setreply(ctx, context, COND_EOM, action);
 		}
 	}

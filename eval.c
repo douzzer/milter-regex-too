@@ -102,6 +102,7 @@ static const char *lookup_res_name(int resval) {
 	case VAL_UNDEF: return "UNDEF";
 	case VAL_TRUE: return "TRUE";
 	case VAL_FALSE: return "FALSE";
+	case VAL_INPROGRESS: return "INPROGRESS";
 	default: return "BAD";
 	}
 }
@@ -480,21 +481,33 @@ eval_cond_1(struct context *context, cond_t type,
 
 	struct cond_list *cl;
 
-	int n_pushed = 0;
 	int initial_captures_change_count = context->captures_change_count;
 
 again:
 
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
 		int r;
-		if (res[cl->cond->idx] != VAL_UNDEF)
+		if ((res[cl->cond->idx] != VAL_UNDEF) &&
+		    (res[cl->cond->idx] != VAL_INPROGRESS))
 			continue;
 		r = check_cond(context, cl->cond, a, b);
 		if (r < 0)
 			return (NULL);
 		else if (!r) {
-			push_cond_result(context, cl->cond, VAL_TRUE);
-			++n_pushed;
+			switch(cl->cond->type) {
+			case COND_CAPTURE_ALL_HEADER:
+			case COND_CAPTURE_ALL_BODY:
+#ifdef GEOIP2
+			case COND_CAPTURE_ALL_HEADER_GEO:
+			case COND_CAPTURE_ALL_BODY_GEO:
+#endif
+				if (res[cl->cond->idx] != VAL_INPROGRESS)
+					push_cond_result(context, cl->cond, VAL_INPROGRESS);
+				break;
+			default:
+				push_cond_result(context, cl->cond, VAL_TRUE);
+				break;
+			}
 		}
 	}
 
@@ -551,6 +564,14 @@ eval_end(struct context *context, cond_t type)
 		if (res[cl->cond->idx] == VAL_UNDEF) {
 			push_cond_result(context, cl->cond, VAL_FALSE);
 			++n_pushed;
+		} else if (res[cl->cond->idx] == VAL_INPROGRESS) {
+			/* this won't actually do anything, because captures
+			 * aren't real conds, but it will force it to VAL_TRUE,
+			 * which usefully records that the capture was closed
+			 * out.
+			 */
+			push_cond_result(context, cl->cond, VAL_TRUE);
+			++n_pushed;
 		}
 	}
 
@@ -560,6 +581,12 @@ eval_end(struct context *context, cond_t type)
 				continue;
 			if (res[cl->cond->idx] == VAL_UNDEF) {
 				push_cond_result(context, cl->cond, VAL_FALSE);
+				++n_pushed;
+			} else if (res[cl->cond->idx] == VAL_INPROGRESS) {
+				/* same as above -- this won't actually do
+				 * anything.
+				 */
+				push_cond_result(context, cl->cond, VAL_TRUE);
 				++n_pushed;
 			}
 		}
@@ -1013,7 +1040,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 		if (c->args[1].empty) {
 			insert_kv_binding(context, c->args[2].src, b, b_len_left, 0);
-			return c->type == COND_CAPTURE_ALL_HEADER; /* return false to arrange for calls on every header regardless of earlier match. */
+			return 0;
 		}
 
 		const char *b_ptr = b;
@@ -1054,10 +1081,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			b_ptr += matches[0].rm_eo;
 		}
 
-		if (c->type == COND_CAPTURE_ALL_HEADER)
-			return 1; /* return false to arrange for calls on every header regardless of earlier match. */
-		else
-			return (n_inserted > 0) ? 0 : 1;
+		return (n_inserted > 0) ? 0 : 1;
 	}
 
 #ifdef GEOIP2
@@ -1083,7 +1107,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 
 		if (c->args[0].empty) {
 			insert_kv_binding(context, c->args[1].src, a, a_len_left, 0);
-			return c->type == COND_CAPTURE_ALL_BODY; /* return false to arrange for calls on every header regardless of earlier match. */
+			return 0;
 		}
 
 		const char *a_ptr = a;
@@ -1124,10 +1148,7 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			a_ptr += matches[0].rm_eo;
 		}
 
-		if (c->type == COND_CAPTURE_ALL_BODY)
-			return 1; /* return false to arrange for calls on every header regardless of earlier match. */
-		else
-			return (n_inserted > 0) ? 0 : 1;
+		return (n_inserted > 0) ? 0 : 1;
 	}
 
 #ifdef GEOIP2
@@ -2741,7 +2762,11 @@ const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
 int build_res_report(struct context *context) {
 	if (context->res_report)
 		return 0;
-	context->res_report = (char *)malloc(context->rs->maxidx + 6);
+#if DEBUG_UNDEF_CONDS
+	context->res_report = (char *)malloc(((context->rs->maxidx + 2) / 3) + 5 + 1);
+#else
+	context->res_report = (char *)malloc(((context->rs->maxidx + 5) / 6) + 5 + 1);
+#endif
 	if (! context->res_report)
 		return -1;
 	else {
@@ -2759,8 +2784,24 @@ int build_res_report(struct context *context) {
 			for (struct cond_list *cl = context->rs->cond[cl_i];
 			     cl;
 			     cl = cl->next) {
-				if (context->res[cl->cond->idx] == VAL_TRUE)
+#if DEBUG_UNDEF_CONDS
+				/* encode false as 00, true as 01, undef as 10, and in progress as 11 */
+
+				if ((context->res[cl->cond->idx] == VAL_TRUE) ||
+				    (context->res[cl->cond->idx] == VAL_INPROGRESS))
 					thischar |= 1 << thisbit;
+				if (++thisbit == 6) {
+					*crbp++ = base64_chars[thischar];
+					thischar = 0;
+					thisbit = 0;
+				}
+				if ((context->res[cl->cond->idx] == VAL_UNDEF) ||
+				    (context->res[cl->cond->idx] == VAL_INPROGRESS))
+					thischar |= 1 << thisbit;
+#else
+				if ((context->res[cl->cond->idx] == VAL_TRUE) || (context->res[cl->cond->idx] == VAL_INPROGRESS))
+					thischar |= 1 << thisbit;
+#endif
 				if (++thisbit == 6) {
 					*crbp++ = base64_chars[thischar];
 					thischar = 0;
@@ -2799,8 +2840,13 @@ int res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_a
 		for (const struct cond_list *cl = rs->cond[cl_i];
 		     cl;
 		     cl = cl->next) {
+#if DEBUG_UNDEF_CONDS
+			int cond_byte_offset = cond_n / 3;
+			int cond_bit_offset = (cond_n % 3) * 2;
+#else
 			int cond_byte_offset = cond_n / 6;
 			int cond_bit_offset = cond_n % 6;
+#endif
 			if (cond_byte_offset >= res_len) {
 				printf("supplied res is too short for loaded config.\n");
 				return -1;
@@ -2820,6 +2866,38 @@ int res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_a
 				printf("supplied res has non-base64 char #%d.\n", decoded);
 				return -1;
 			}
+#if DEBUG_UNDEF_CONDS
+
+			{
+				int setchar;
+				switch ((decoded >> cond_bit_offset) & 3)  {
+				case 0:
+					setchar = 'o'; /* VAL_FALSE */
+					break;
+				case 1:
+					setchar = '*'; /* VAL_TRUE */
+					break;
+				case 2:
+					setchar = '?'; /* VAL_UNDEF */
+					break;
+				case 3:
+					setchar = '+'; /* VAL_INPROGRESS */
+					break;
+				}
+				if (decode_all_flag || (setchar == '*')) {
+					printf("R=%c L%d C%d %s", setchar, cl->cond->lineno, cl->cond->colno, lookup_cond_name(cl->cond->type));
+					if (cl->cond->args[0].src)
+						printf(" %s", cl->cond->args[0].src);
+					if (cl->cond->args[1].src)
+						printf(" %s", cl->cond->args[1].src);
+					if (cl->cond->args[2].src)
+						printf(" %s", cl->cond->args[2].src);
+					if (cl->cond->args[3].src)
+						printf(" %s", cl->cond->args[3].src);
+					putchar('\n');
+				}
+			}
+#else
 			if (decode_all_flag || (decoded & (1 << cond_bit_offset))) {
 				printf("R=%d L%d C%d %s", decoded & (1 << cond_bit_offset) ? 1 : 0, cl->cond->lineno, cl->cond->colno, lookup_cond_name(cl->cond->type));
 				if (cl->cond->args[0].src)
@@ -2832,12 +2910,21 @@ int res_decode(const struct ruleset *rs, const char *res_to_decode, int decode_a
 					printf(" %s", cl->cond->args[3].src);
 				putchar('\n');
 			}
+#endif
 			++cond_n;
 		}
 	}
+#if DEBUG_UNDEF_CONDS
+	if ((cond_n + 2) / 3 != res_len) {
+		printf("[DEBUG_UNDEF_CONDS] supplied res length is %d, but loaded config produces res length %d.\n", res_len, (cond_n + 2) / 3);
+		return -1;
+	}
+#else
 	if ((cond_n + 5) / 6 != res_len) {
 		printf("supplied res length is %d, but loaded config produces res length %d.\n", res_len, (cond_n + 5) / 6);
 		return -1;
-	} else
+	}
+#endif
+	else
 		return 0;
 }

@@ -49,9 +49,30 @@ sanitize: override CFLAGS+=-fsanitize=address -fsanitize=pointer-subtract -fsani
 sanitize: override LDFLAGS+=-fsanitize=address -fsanitize=pointer-subtract -fsanitize=leak -fsanitize=undefined -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=bounds-strict -fno-sanitize-recover=all
 sanitize: all
 
-milter-regex-version.o: milter-regex.o eval.o $(GEOIP_OBJS) strlcat.o strlcpy.o parse.tab.o
+# glibc 2.38 adds strlcat/strlcpy -- test empirically.
+HAVE_STRLCPY := $(shell if printf '\
+        #include <stdlib.h>\n\
+        #include <string.h>\n\
+        #include <stdio.h>\n\
+        int main(int argc, char **argv) {\n\
+	    static const char s[] = "foo";\n\
+	    char c[10];\n\
+            (void)argc; (void)argv;\n\
+	    strlcpy(c, s, sizeof c);\n\
+	    strlcat(c, s, sizeof c);\n\
+	    puts(c);\n\
+	    return 0;\n\
+        }' | $(CC) $(CFLAGS) $(LDFLAGS) -x c - -o /dev/null -MF /dev/null >/dev/null 2>&1;\
+	then echo 1; else echo 0; fi)
 
-milter-regex-too: milter-regex-version.o milter-regex.o eval.o $(GEOIP_OBJS) strlcat.o strlcpy.o parse.tab.o
+ifeq "$(HAVE_STRLCPY)" "0"
+    EXTRA_OBJS := strlcat.o strlcpy.o
+    override CFLAGS += -DNEED_BUNDLED_STRL
+endif
+
+milter-regex-version.o: milter-regex.o eval.o $(GEOIP_OBJS) parse.tab.o $(EXTRA_OBJS)
+
+milter-regex-too: milter-regex-version.o milter-regex.o eval.o $(GEOIP_OBJS) parse.tab.o $(EXTRA_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(LIBS)
 
 %.o: %.c

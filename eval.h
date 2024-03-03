@@ -39,7 +39,7 @@
 #include <regex.h>
 #endif
 
-enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
+enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE, VAL_INPROGRESS };
 
 /* any of these assigned to context->current_phase or passed to eval_clear() need to stay in
  * natural sequence, but needn't be contiguous.
@@ -58,24 +58,27 @@ enum { VAL_UNDEF=0, VAL_TRUE, VAL_FALSE };
  * i.e. immediately before body-related conds, and in any case must appear after
  * COND_EOH.
  */
-typedef enum { COND_NONE=0, COND_STATIC, COND_CAPTURE_MACRO,
-#ifdef GEOIP2
-	       COND_CAPTURE_MACRO_GEO,
-#endif
+typedef enum { COND_NONE=0, COND_STATIC,
 	       COND_CONNECT,
 #ifdef GEOIP2
 	       COND_CONNECTGEO,
 #endif
 	       COND_HELO, COND_ENVFROM, COND_ENVRCPT,
+	       COND_CAPTURE_MACRO,
+#ifdef GEOIP2
+	       COND_CAPTURE_MACRO_GEO,
+#endif
+	       COND_MACRO,
 	       COND_CAPTURE_ONCE_HEADER, COND_CAPTURE_ALL_HEADER,
 #ifdef GEOIP2
 	       COND_CAPTURE_ONCE_HEADER_GEO, COND_CAPTURE_ALL_HEADER_GEO,
 #endif
-	       COND_COMPARE_HEADER, COND_HEADER,
+	       COND_COMPARE_HEADER,
 #ifdef GEOIP2
 	       COND_HEADERGEO,
 #endif
-	       COND_EOH, COND_MACRO,
+	       COND_HEADER,
+	       COND_EOH,
 	       COND_CAPTURE_ONCE_BODY, COND_CAPTURE_ALL_BODY,
 #ifdef GEOIP2
 	       COND_CAPTURE_ONCE_BODY_GEO, COND_CAPTURE_ALL_BODY_GEO,
