@@ -2,6 +2,13 @@
 #define MILTER_REGEX_H
 
 #include "eval.h"
+/* silence frivolous -Wcast-aligns around casts to sockaddr_in */
+#ifndef _SOCK_ADDR
+    #define _SOCK_ADDR struct sockaddr_storage
+#endif
+#ifndef _SOCK_ADDR_FAMILY_NAME
+    #define _SOCK_ADDR_FAMILY_NAME ss_family
+#endif
 #include <libmilter/mfapi.h>
 
 #ifdef USE_LIBROKEN

@@ -31,7 +31,7 @@
  */
 
 %{
-static const char rcsid[] = "$Id: parse.y,v 1.2 2011/07/16 13:52:07 dhartmei Exp $";
+/* static const char rcsid[] = "$Id: parse.y,v 1.2 2011/07/16 13:52:07 dhartmei Exp $"; */
 
 #include <ctype.h>
 #include <errno.h>

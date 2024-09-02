@@ -1,5 +1,6 @@
 # $Id: Makefile.linux,v 1.3 2011/07/16 13:51:34 dhartmei Exp $
-SHELL=/bin/bash
+SHELL=bash
+YACC=$(shell command -V bison >/dev/null 2>&1 && echo bison || echo yacc)
 
 LIBS = -lmilter -lpthread
 
@@ -79,7 +80,7 @@ milter-regex-too: milter-regex-version.o milter-regex.o eval.o $(GEOIP_OBJS) par
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 parse.tab.c parse.tab.h: parse.y
-	bison -d parse.y
+	$(YACC) -o parse.tab.c -d parse.y
 
 milter-regex-too.cat8: milter-regex-too.8
 	nroff -Tascii -mandoc milter-regex-too.8 > milter-regex-too.cat8

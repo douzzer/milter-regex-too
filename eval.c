@@ -554,8 +554,6 @@ eval_end(struct context *context, cond_t type)
 
 	struct cond_list *cl;
 
-	int n_pushed = 0;
-
 	eval_mutex_lock();
 
 	context->last_phase_done = type;
@@ -563,7 +561,6 @@ eval_end(struct context *context, cond_t type)
 	for (cl = rs->cond[type]; cl != NULL; cl = cl->next) {
 		if (res[cl->cond->idx] == VAL_UNDEF) {
 			push_cond_result(context, cl->cond, VAL_FALSE);
-			++n_pushed;
 		} else if (res[cl->cond->idx] == VAL_INPROGRESS) {
 			/* this won't actually do anything, because captures
 			 * aren't real conds, but it will force it to VAL_TRUE,
@@ -571,7 +568,6 @@ eval_end(struct context *context, cond_t type)
 			 * out.
 			 */
 			push_cond_result(context, cl->cond, VAL_TRUE);
-			++n_pushed;
 		}
 	}
 
@@ -581,13 +577,11 @@ eval_end(struct context *context, cond_t type)
 				continue;
 			if (res[cl->cond->idx] == VAL_UNDEF) {
 				push_cond_result(context, cl->cond, VAL_FALSE);
-				++n_pushed;
 			} else if (res[cl->cond->idx] == VAL_INPROGRESS) {
 				/* same as above -- this won't actually do
 				 * anything.
 				 */
 				push_cond_result(context, cl->cond, VAL_TRUE);
-				++n_pushed;
 			}
 		}
 	}

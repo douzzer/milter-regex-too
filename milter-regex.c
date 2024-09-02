@@ -888,7 +888,7 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 	strlcpy(context->host_name, name, sizeof(context->host_name));
 	strlcpy(context->host_addr, "unknown", sizeof(context->host_addr));
 	if (sa) {
-		switch (sa->sa_family) {
+		switch (sa->_SOCK_ADDR_FAMILY_NAME) {
 		case AF_INET: {
 			struct sockaddr_in *sin = (struct sockaddr_in *)sa;
 
@@ -1148,6 +1148,13 @@ static void zap_ctrls(char *s) {
 	}
 }
 
+#ifdef USE_GMIME
+static void cleanup_free(char **p) {
+  if (*p)
+    free(*p);
+}
+#endif
+
 static sfsistat
 cb_header(SMFICTX *ctx, char *name, char *value)
 {
@@ -1162,13 +1169,9 @@ cb_header(SMFICTX *ctx, char *name, char *value)
 	context->current_phase = COND_HEADER;
 
 #ifdef USE_GMIME
-	void cleanup_free(char **p) {
-		if (*p)
-			free(*p);
-	}
 	__attribute__((__cleanup__(cleanup_free))) char *decoded = 0;
 
-	char *rawvalue = 0;
+	char *rawvalue = NULL;
 
 	if (strstr(value,"=?") && strstr(value,"?=")) {
 	  /* see https://securityintelligence.com/news/security-vulnerabilities-in-rfc-1342-enable-spoofing-and-code-injection-attacks/
