@@ -1466,7 +1466,8 @@ cb_eom(SMFICTX *ctx)
 
 	if ((result == SMFIS_ACCEPT) || (result == SMFIS_CONTINUE)) {
 		const char *if_addr;
-		if (context->auth_authen[0]
+		if ((context->action && (context->action->type == ACTION_WHITELIST))
+		    || context->auth_authen[0]
 		    || smfi_getsymval(ctx, (char *)"{auth_authen}")
 		    || (! strcasecmp(context->host_name,context->my_name))
 		    || (! (if_addr = smfi_getsymval(ctx, (char *)"{if_addr}")))
