@@ -387,7 +387,7 @@ static void
 setreply_lognotice(struct context *context) {
 	int lvl;
 
-	if ((! context->action) || (context->action->type == ACTION_ACCEPT) || (context->action->type == ACTION_WHITELIST))
+	if (context->message_status == MESSAGE_ANNOTATED)
 		lvl = LOG_DEBUG;
 	else
 		lvl = LOG_INFO;
@@ -406,6 +406,7 @@ setreply_lognotice(struct context *context) {
 			action_name = "EARLY/NOACTION";
 			break;
 		case MESSAGE_COMPLETED:
+		case MESSAGE_ANNOTATED:
 			action_name = "FALLTHROUGH";
 			break;
 		case MESSAGE_LOGGED:
@@ -421,6 +422,7 @@ setreply_lognotice(struct context *context) {
 			strcpy(action_name_upcased,"EARLY/");
 			break;
 		case MESSAGE_COMPLETED:
+		case MESSAGE_ANNOTATED:
 			action_name_upcased[0] = 0;
 			break;
 		case MESSAGE_LOGGED:
@@ -1499,6 +1501,15 @@ cb_eom(SMFICTX *ctx)
 				 context->check_cond_count,
 				 context->res_report);
 			(void)smfi_insheader(ctx, 0, (char *)"X-Milter-Regex-Decision-Trace", action_msg_buf);
+			/* if this is a regular accept, inhibit logging the
+			 * trace -- the header insertion is itself logged.
+			 */
+			if ((context->message_status == MESSAGE_COMPLETED) &&
+			    context->action &&
+			    (context->action->type == ACTION_ACCEPT))
+			{
+				context->message_status = MESSAGE_ANNOTATED;
+			}
 		}
 	}
 

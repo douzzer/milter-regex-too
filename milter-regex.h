@@ -31,7 +31,7 @@ struct context {
 	unsigned long	 smfi_phases;
 	long long int	 eval_time_cum;
 	int		 check_cond_count;
-	enum { MESSAGE_INPROGRESS=0, MESSAGE_ABORTED, MESSAGE_COMPLETED, MESSAGE_LOGGED } message_status;
+	enum { MESSAGE_INPROGRESS=0, MESSAGE_ABORTED, MESSAGE_COMPLETED, MESSAGE_ANNOTATED, MESSAGE_LOGGED } message_status;
 	struct ruleset	*rs;
 	int		*res;
 	struct action	*current_winning_action;
