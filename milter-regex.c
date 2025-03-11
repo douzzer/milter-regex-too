@@ -925,6 +925,11 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 				context->host_name, context->host_addr)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
 
+	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
+				NULL, NULL)) !=
+	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
+
 	if ((action = eval_end(context, COND_CONNECT)) !=
 	    NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
@@ -933,14 +938,15 @@ cb_connect(SMFICTX *ctx, char *name, _SOCK_ADDR *sa)
 	if ((action = eval_cond(context, COND_CONNECTGEO,
 				context->host_addr, NULL)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECTGEO, action);
-	if ((action = eval_end(context, COND_CONNECTGEO)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECTGEO, action);
-#endif
 
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECT, action);
+
+	if ((action = eval_end(context, COND_CONNECTGEO)) != NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_CONNECTGEO, action);
+#endif
 
 	context->action_result = SMFIS_CONTINUE;
 
@@ -989,12 +995,13 @@ cb_helo(SMFICTX *ctx, char *arg)
 	if ((action = eval_cond(context, COND_HELO,
 	    arg, NULL)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
-	if ((action = eval_end(context, COND_HELO)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
 
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
+
+	if ((action = eval_end(context, COND_HELO)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_HELO, action);
 
 	return (SMFIS_CONTINUE);
@@ -1077,8 +1084,6 @@ cb_envfrom(SMFICTX *ctx, char **args)
 		    *args, NULL)) != NULL)
 			SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 	}
-	if ((action = eval_end(context, COND_ENVFROM)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 
 	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action,
@@ -1087,6 +1092,9 @@ cb_envfrom(SMFICTX *ctx, char **args)
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
+
+	if ((action = eval_end(context, COND_ENVFROM)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVFROM, action);
 
 	return (SMFIS_CONTINUE);
@@ -1127,8 +1135,6 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 		    *args, NULL)) != NULL)
 			SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 	}
-	if ((action = eval_end(context, COND_ENVRCPT)) != NULL)
-		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 
 	if ((action = check_macros(ctx, context)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action,
@@ -1137,6 +1143,9 @@ cb_envrcpt(SMFICTX *ctx, char **args)
 	if ((action = eval_cond(context, COND_COMPARE_CAPTURES,
 				NULL, NULL)) !=
 	    NULL)
+		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
+
+	if ((action = eval_end(context, COND_ENVRCPT)) != NULL)
 		SETREPLY_RETURN_IF_DONE(ctx, context, COND_ENVRCPT, action);
 
 	return (SMFIS_CONTINUE);
