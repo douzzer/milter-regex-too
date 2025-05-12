@@ -47,9 +47,9 @@ struct context {
 	char		 env_from[128];
 	char		 env_rcpt[2048];
 	char		 hdr_from[128];
-	char		 hdr_to[128];
-	char		 hdr_cc[128];
-	char		 hdr_subject[128];
+	char		 hdr_to[2048];
+	char		 hdr_cc[2048];
+	char		 hdr_subject[256];
 	struct kv_binding *captures;
 	int		 captures_change_count;
 	char		 end_eval_note[128];
