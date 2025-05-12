@@ -1655,12 +1655,19 @@ check_cond(struct context *context, struct cond *c, const char *a, const char *b
 			      if (compare_values(first_operand, first_operand_len, &c->args[1], second_operand, second_operand_len, &c->args[3]) == 0)
 				return 0;
 
+			      /* if used whole-RE fallback, need to break now. */
+			      if (second_operand_matches_i == 0)
+				break;
+
 /* end 6 */
 			    } while (--second_operand_matches_left > 0);
 
 /* end 5 */
 			  }
 
+			  /* if used whole-RE fallback, need to break now. */
+			  if (first_operand_matches_i == 0)
+			    break;
 /* end 4 */
 			} while (--first_operand_matches_left > 0);
 
